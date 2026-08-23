@@ -23,7 +23,11 @@ jobs:
         run: npm ci
 
       - name: Write .env
-        run: echo "EXPO_PUBLIC_GEMINI_API_KEY=${{ secrets.EXPO_PUBLIC_GEMINI_API_KEY }}" > .env
+        env:
+          GEMINI_KEY: ${{ secrets.EXPO_PUBLIC_GEMINI_API_KEY }}
+        run: |
+          echo "EXPO_PUBLIC_GEMINI_API_KEY=$GEMINI_KEY" > .env
+          echo "Gemini key length: ${#GEMINI_KEY}"
 
       - name: Prebuild iOS native project
         run: npx expo prebuild --platform ios --no-install
