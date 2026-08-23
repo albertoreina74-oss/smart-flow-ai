@@ -7,19 +7,57 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.smartflow.ai",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
+      "package": "com.smartflow.ai",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Consenti a Smart Flow AI di accedere alla fotocamera per scansionare documenti e immagini."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Consenti a Smart Flow AI di accedere alle tue foto per la scansione OCR.",
+          "cameraPermission": "Consenti a Smart Flow AI di accedere alla fotocamera per scansionare documenti e immagini."
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "d5796c25-f72a-487a-aeb4-008ac4577a2b"
+      }
+    },
+    "owner": "alberto7474",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/d5796c25-f72a-487a-aeb4-008ac4577a2b"
     }
   }
 }
