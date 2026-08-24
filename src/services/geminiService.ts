@@ -6,7 +6,7 @@ import {
   SYSTEM_PROMPT_OCR,
 } from '../constants/prompts';
 
-const GEMINI_MODEL = 'gemini-1.5-flash';
+const GEMINI_MODEL = 'gemini-2.5-flash';
 const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 function getApiKey(): string {

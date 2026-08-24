@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as Haptics from 'expo-haptics';
 import * as Speech from 'expo-speech';
@@ -83,6 +84,7 @@ function formatMetrics({ words, characters, readingTimeSeconds }: TextMetrics): 
 }
 
 export function HomeScreen() {
+  const insets = useSafeAreaInsets();
   const [inputText, setInputText] = useState('');
   const [outputText, setOutputText] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
@@ -257,7 +259,10 @@ export function HomeScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingTop: Math.max(insets.top, spacing.lg) },
+          ]}
           keyboardShouldPersistTaps="handled"
         >
           <View style={styles.header}>
