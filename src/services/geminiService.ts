@@ -24,6 +24,14 @@ function isRetryableStatus(status: number): boolean {
   return status === 429 || status === 503 || status === 500;
 }
 
+// A 429 (quota exhausted / rate limited) will not resolve itself by retrying
+// the same model — only switching model (a separate quota bucket) helps.
+// A 500/503 (transient overload) is worth one quick retry on the same model
+// before giving up on it.
+function isSameModelRetryWorthy(status: number): boolean {
+  return status === 503 || status === 500;
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -72,7 +80,9 @@ export function getFriendlyErrorMessage(error: unknown): string {
     return 'Il modello AI richiesto non è al momento disponibile. Riprova più tardi.';
   }
   if (raw.includes('(429)')) {
-    return 'Troppe richieste in questo momento. Attendi qualche secondo e riprova.';
+    return raw.includes('PerDay')
+      ? 'Hai raggiunto il limite giornaliero gratuito di richieste AI. Riprova domani o aumenta il piano su Google AI Studio.'
+      : 'Troppe richieste in questo momento. Attendi qualche secondo e riprova.';
   }
   if (raw.includes('(401)') || raw.includes('(403)')) {
     return 'Chiave API non valida o priva dei permessi necessari.';
@@ -112,33 +122,42 @@ async function fetchGenerateContent(model: string, apiKey: string, body: object)
 }
 
 /**
- * Calls Gemini with resilience against transient overload: retries the
- * primary model once after a short delay, then falls back to a secondary
- * model if the primary is still failing with a retryable (429/500/503)
- * status. Non-retryable errors (auth, bad request, ...) fail immediately.
+ * Calls Gemini with resilience against transient overload and quota limits.
+ * - 500/503 (transient overload): one quick retry on the same model, since
+ *   it may well succeed moments later.
+ * - 429 (quota exhausted / rate limited): retrying the same model is
+ *   pointless — the daily/per-minute quota won't reset in a few seconds —
+ *   so this skips straight to the fallback model (a separate quota bucket).
+ * - Any other error (auth, bad request, ...) fails immediately.
  */
 async function generateContentWithResilience(apiKey: string, body: object): Promise<string> {
-  const attempts: { model: string; delayBeforeMs: number }[] = [
-    { model: GEMINI_MODEL, delayBeforeMs: 0 },
-    { model: GEMINI_MODEL, delayBeforeMs: RETRY_DELAY_MS },
-    { model: FALLBACK_MODEL, delayBeforeMs: 0 },
-  ];
-
   let lastError: unknown;
-  for (const attempt of attempts) {
-    if (attempt.delayBeforeMs) {
-      await delay(attempt.delayBeforeMs);
+
+  try {
+    return await fetchGenerateContent(GEMINI_MODEL, apiKey, body);
+  } catch (error) {
+    lastError = error;
+    if (!(error instanceof GeminiHttpError) || !isRetryableStatus(error.status)) {
+      throw error;
     }
-    try {
-      return await fetchGenerateContent(attempt.model, apiKey, body);
-    } catch (error) {
-      lastError = error;
-      if (!(error instanceof GeminiHttpError) || !isRetryableStatus(error.status)) {
-        throw error;
+    if (isSameModelRetryWorthy(error.status)) {
+      await delay(RETRY_DELAY_MS);
+      try {
+        return await fetchGenerateContent(GEMINI_MODEL, apiKey, body);
+      } catch (retryError) {
+        lastError = retryError;
+        if (!(retryError instanceof GeminiHttpError) || !isRetryableStatus(retryError.status)) {
+          throw retryError;
+        }
       }
     }
   }
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+
+  try {
+    return await fetchGenerateContent(FALLBACK_MODEL, apiKey, body);
+  } catch (error) {
+    throw error instanceof Error ? error : (lastError instanceof Error ? lastError : new Error(String(error)));
+  }
 }
 
 export async function processText(
