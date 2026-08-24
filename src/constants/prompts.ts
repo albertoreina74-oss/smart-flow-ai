@@ -7,7 +7,7 @@ export const MODE_LABELS: Record<ProcessMode, string> = {
   clean: 'Pulisci',
   formal: 'Formale',
   summary: 'Sintesi',
-  translate: 'Traduci',
+  translate: '🌐 Traduci',
 };
 
 export const DENSITY_LABELS: Record<Density, string> = {
@@ -47,3 +47,5 @@ export function buildTranslatePrompt(language: Language): string {
 }
 
 export const SYSTEM_PROMPT_OCR = `Estrai il testo dall'immagine fornita nel modo più fedele possibile, mantenendo la formattazione originale dove ragionevole.`;
+
+export const SYSTEM_PROMPT_DOCUMENT = `Estrai integralmente il testo dal documento fornito nel modo più fedele possibile, mantenendo la formattazione originale (paragrafi, elenchi) dove ragionevole. Restituisci esclusivamente il testo estratto, senza commenti aggiuntivi.`;

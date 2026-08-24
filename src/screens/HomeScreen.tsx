@@ -18,22 +18,34 @@ import { StatusBar } from 'expo-status-bar';
 import * as Haptics from 'expo-haptics';
 import * as Speech from 'expo-speech';
 import {
+  ExpoSpeechRecognitionModule,
+  useSpeechRecognitionEvent,
+} from 'expo-speech-recognition';
+import {
   Briefcase,
   Camera,
   Clock,
   ClipboardPaste,
   Copy,
+  FileText,
   Languages,
   ListChecks,
+  Mic,
+  MicOff,
+  Plus,
   Share2,
   Sparkles,
+  Star,
   Trash2,
+  TriangleAlert,
   Volume2,
   VolumeX,
   WandSparkles,
 } from 'lucide-react-native';
 import { Card } from '../components/Card';
 import { HistoryModal } from '../components/HistoryModal';
+import { NewPromptModal } from '../components/NewPromptModal';
+import { SettingsModal } from '../components/SettingsModal';
 import { Toast } from '../components/Toast';
 import {
   colors,
@@ -52,17 +64,39 @@ import {
   MODE_LABELS,
   ProcessMode,
 } from '../constants/prompts';
-import { extractTextFromImage, processText } from '../services/geminiService';
+import {
+  extractTextFromDocument,
+  extractTextFromImage,
+  getFriendlyErrorMessage,
+  StreamHandle,
+  streamProcessText,
+} from '../services/geminiService';
 import { readClipboard, writeClipboard } from '../services/clipboardService';
 import { pickImageFromCamera, pickImageFromLibrary } from '../services/imagePickerService';
-import { addHistoryEntry, getHistory, HistoryEntry } from '../services/storageService';
+import { pickDocument } from '../services/documentService';
+import {
+  addCustomPrompt,
+  addHistoryEntry,
+  CustomPrompt,
+  deleteHistoryEntry,
+  getCustomPrompts,
+  getHistory,
+  HistoryEntry,
+  toggleFavoriteEntry,
+} from '../services/storageService';
 
-const TONE_OPTIONS: { id: ProcessMode; icon: typeof WandSparkles }[] = [
+const BUILTIN_TONE_OPTIONS: { id: ProcessMode; icon: typeof WandSparkles }[] = [
   { id: 'clean', icon: WandSparkles },
   { id: 'formal', icon: Briefcase },
   { id: 'summary', icon: ListChecks },
   { id: 'translate', icon: Languages },
 ];
+
+const BUILTIN_MODE_IDS: string[] = BUILTIN_TONE_OPTIONS.map((option) => option.id);
+
+function isBuiltinMode(id: string): id is ProcessMode {
+  return BUILTIN_MODE_IDS.includes(id);
+}
 
 const DENSITY_OPTIONS: Density[] = ['essential', 'detailed'];
 
@@ -70,10 +104,13 @@ const QUICK_ACTIONS: { id: string; label: string; icon: typeof ClipboardPaste }[
   { id: 'paste', label: 'Incolla', icon: ClipboardPaste },
   { id: 'clear', label: 'Cancella', icon: Trash2 },
   { id: 'camera', label: 'Fotocamera', icon: Camera },
+  { id: 'document', label: 'Documento', icon: FileText },
+  { id: 'dictate', label: 'Dettatura', icon: Mic },
 ];
 
 const TOAST_DURATION_MS = 1800;
 const WORDS_PER_MINUTE = 200;
+const DOUBLE_HAPTIC_DELAY_MS = 150;
 
 type TextMetrics = {
   words: number;
@@ -105,16 +142,29 @@ export function HomeScreen() {
   const [inputText, setInputText] = useState('');
   const [outputText, setOutputText] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
-  const [selectedTone, setSelectedTone] = useState<ProcessMode>('clean');
+  const [selectedTone, setSelectedTone] = useState<string>('clean');
   const [selectedDensity, setSelectedDensity] = useState<Density>('essential');
   const [selectedLanguage, setSelectedLanguage] = useState<Language>('en');
+  const [temperature, setTemperature] = useState(0.7);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
+  const [isDocumentLoading, setIsDocumentLoading] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [isHistoryVisible, setIsHistoryVisible] = useState(false);
+  const [isSettingsVisible, setIsSettingsVisible] = useState(false);
+  const [isNewPromptVisible, setIsNewPromptVisible] = useState(false);
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
+  const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>([]);
+  const [currentEntryId, setCurrentEntryId] = useState<string | null>(null);
+  const [isCurrentFavorite, setIsCurrentFavorite] = useState(false);
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const streamHandleRef = useRef<StreamHandle | null>(null);
+
+  useEffect(() => {
+    getCustomPrompts().then(setCustomPrompts);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -122,8 +172,25 @@ export function HomeScreen() {
         clearTimeout(toastTimeoutRef.current);
       }
       Speech.stop();
+      streamHandleRef.current?.cancel();
     };
   }, []);
+
+  useSpeechRecognitionEvent('result', (event) => {
+    const transcript = event.results[0]?.transcript;
+    if (transcript) {
+      setInputText(transcript);
+    }
+  });
+
+  useSpeechRecognitionEvent('end', () => {
+    setIsRecording(false);
+  });
+
+  useSpeechRecognitionEvent('error', (event) => {
+    setIsRecording(false);
+    setErrorMessage(getFriendlyErrorMessage(new Error(event.message || event.error)));
+  });
 
   const showToast = (message: string) => {
     if (toastTimeoutRef.current) {
@@ -131,6 +198,66 @@ export function HomeScreen() {
     }
     setToastMessage(message);
     toastTimeoutRef.current = setTimeout(() => setToastMessage(''), TOAST_DURATION_MS);
+  };
+
+  const runProcessing = async (sourceText: string) => {
+    const trimmed = sourceText.trim();
+    if (!trimmed || isProcessing) {
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setIsProcessing(true);
+    setErrorMessage('');
+    setOutputText('');
+    setCurrentEntryId(null);
+    setIsCurrentFavorite(false);
+    Speech.stop();
+    setIsSpeaking(false);
+
+    const isCustom = !isBuiltinMode(selectedTone);
+    const customPrompt = isCustom
+      ? customPrompts.find((prompt) => `custom:${prompt.id}` === selectedTone)?.prompt
+      : undefined;
+    const modeLabel = isCustom
+      ? customPrompts.find((prompt) => `custom:${prompt.id}` === selectedTone)?.label ??
+        'Personalizzata'
+      : MODE_LABELS[selectedTone as ProcessMode];
+
+    streamHandleRef.current?.cancel();
+    streamHandleRef.current = streamProcessText(
+      trimmed,
+      isCustom ? 'clean' : (selectedTone as ProcessMode),
+      selectedDensity,
+      selectedLanguage,
+      {
+        onChunk: (fullTextSoFar) => setOutputText(fullTextSoFar),
+        onDone: async (finalText) => {
+          setIsProcessing(false);
+          setOutputText(finalText);
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          setTimeout(() => {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          }, DOUBLE_HAPTIC_DELAY_MS);
+          try {
+            const updated = await addHistoryEntry({
+              originalText: trimmed,
+              generatedText: finalText,
+              modeLabel,
+            });
+            setHistoryEntries(updated);
+            setCurrentEntryId(updated[0]?.id ?? null);
+          } catch {
+            // History persistence failure shouldn't block the result from being shown.
+          }
+        },
+        onError: (error) => {
+          setIsProcessing(false);
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          setErrorMessage(getFriendlyErrorMessage(error));
+        },
+      },
+      { customPrompt, temperature },
+    );
   };
 
   const runImageScan = async (source: 'camera' | 'library') => {
@@ -144,11 +271,61 @@ export function HomeScreen() {
       const extractedText = await extractTextFromImage(image.base64, image.mimeType);
       setInputText(extractedText);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (selectedTone === 'translate') {
+        await runProcessing(extractedText);
+      }
     } catch (error) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setErrorMessage(error instanceof Error ? error.message : 'Errore imprevisto durante la scansione.');
+      setErrorMessage(getFriendlyErrorMessage(error));
     } finally {
       setIsScanning(false);
+    }
+  };
+
+  const runDocumentPick = async () => {
+    setIsDocumentLoading(true);
+    setErrorMessage('');
+    try {
+      const picked = await pickDocument();
+      if (!picked) {
+        return;
+      }
+      const extractedText =
+        picked.kind === 'text'
+          ? picked.text
+          : await extractTextFromDocument(picked.base64, picked.mimeType);
+      setInputText(extractedText);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (selectedTone === 'translate') {
+        await runProcessing(extractedText);
+      }
+    } catch (error) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setErrorMessage(getFriendlyErrorMessage(error));
+    } finally {
+      setIsDocumentLoading(false);
+    }
+  };
+
+  const handleToggleDictation = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (isRecording) {
+      ExpoSpeechRecognitionModule.stop();
+      setIsRecording(false);
+      return;
+    }
+    try {
+      const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      if (!permission.granted) {
+        setErrorMessage('Permesso microfono negato. Abilitalo nelle impostazioni per usare la dettatura.');
+        return;
+      }
+      setErrorMessage('');
+      setIsRecording(true);
+      ExpoSpeechRecognitionModule.start({ lang: 'it-IT', interimResults: true, continuous: true });
+    } catch (error) {
+      setIsRecording(false);
+      setErrorMessage(getFriendlyErrorMessage(error));
     }
   };
 
@@ -172,10 +349,18 @@ export function HomeScreen() {
         { text: 'Scegli dalla libreria', onPress: () => runImageScan('library') },
         { text: 'Annulla', style: 'cancel' },
       ]);
+      return;
+    }
+    if (id === 'document') {
+      runDocumentPick();
+      return;
+    }
+    if (id === 'dictate') {
+      handleToggleDictation();
     }
   };
 
-  const handleToneSelect = (tone: ProcessMode) => {
+  const handleToneSelect = (tone: string) => {
     Haptics.selectionAsync();
     setSelectedTone(tone);
   };
@@ -190,32 +375,13 @@ export function HomeScreen() {
     setSelectedLanguage(language);
   };
 
-  const handleProcess = async () => {
-    if (!inputText.trim() || isProcessing) {
-      return;
-    }
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setIsProcessing(true);
-    setErrorMessage('');
-    Speech.stop();
-    setIsSpeaking(false);
-    try {
-      const originalText = inputText.trim();
-      const result = await processText(originalText, selectedTone, selectedDensity, selectedLanguage);
-      setOutputText(result);
-      await addHistoryEntry({ originalText, generatedText: result, mode: selectedTone });
-    } catch (error) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setErrorMessage(error instanceof Error ? error.message : 'Errore imprevisto.');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
+  const handleProcess = () => runProcessing(inputText);
 
   const handleCopyResult = async () => {
     if (!outputText) {
       return;
     }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     await writeClipboard(outputText);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     showToast('Copiato negli appunti');
@@ -252,6 +418,38 @@ export function HomeScreen() {
     }
   };
 
+  const handleToggleCurrentFavorite = async () => {
+    if (!currentEntryId) {
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const updated = await toggleFavoriteEntry(currentEntryId);
+    setHistoryEntries(updated);
+    const entry = updated.find((item) => item.id === currentEntryId);
+    setIsCurrentFavorite(Boolean(entry?.isFavorite));
+  };
+
+  const handleOpenSettings = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setIsSettingsVisible(true);
+  };
+
+  const handleOpenNewPrompt = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setIsNewPromptVisible(true);
+  };
+
+  const handleSaveNewPrompt = async (label: string, prompt: string) => {
+    const updated = await addCustomPrompt(label, prompt);
+    setCustomPrompts(updated);
+    setIsNewPromptVisible(false);
+    const newPrompt = updated[updated.length - 1];
+    if (newPrompt) {
+      setSelectedTone(`custom:${newPrompt.id}`);
+    }
+    showToast('Modalità salvata');
+  };
+
   const handleOpenHistory = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const entries = await getHistory();
@@ -262,21 +460,49 @@ export function HomeScreen() {
   const handleSelectHistoryEntry = async (entry: HistoryEntry) => {
     setInputText(entry.originalText);
     setOutputText(entry.generatedText);
-    setSelectedTone(entry.mode);
     setErrorMessage('');
+    setCurrentEntryId(entry.id);
+    setIsCurrentFavorite(entry.isFavorite);
     await writeClipboard(entry.generatedText);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsHistoryVisible(false);
     showToast('Ripristinato dallo storico e copiato');
   };
 
+  const handleDeleteHistoryEntry = async (id: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const updated = await deleteHistoryEntry(id);
+    setHistoryEntries(updated);
+    if (id === currentEntryId) {
+      setCurrentEntryId(null);
+      setIsCurrentFavorite(false);
+    }
+  };
+
+  const handleToggleHistoryFavorite = async (id: string) => {
+    const updated = await toggleFavoriteEntry(id);
+    setHistoryEntries(updated);
+    if (id === currentEntryId) {
+      const entry = updated.find((item) => item.id === id);
+      setIsCurrentFavorite(Boolean(entry?.isFavorite));
+    }
+  };
+
   const canProcess = inputText.trim().length > 0 && !isProcessing;
   const inputMetrics = computeMetrics(inputText);
   const outputMetrics = computeMetrics(outputText);
+  const allToneOptions: { id: string; icon: typeof WandSparkles; label?: string }[] = [
+    ...BUILTIN_TONE_OPTIONS,
+    ...customPrompts.map((prompt) => ({
+      id: `custom:${prompt.id}`,
+      icon: Sparkles,
+      label: prompt.label,
+    })),
+  ];
 
   return (
     <LinearGradient colors={gradient.background} style={styles.screen}>
-      <StatusBar style="dark" />
+      <StatusBar style="light" />
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -294,10 +520,14 @@ export function HomeScreen() {
               <Text style={styles.headerSubtitle}>Rielabora il testo in un tocco</Text>
             </View>
             <View style={styles.headerActions}>
-              <View style={styles.badge}>
+              <Pressable
+                style={({ pressed }) => [styles.badge, pressed && styles.historyButtonPressed]}
+                onPress={handleOpenSettings}
+                hitSlop={8}
+              >
                 <Sparkles color={colors.glow} size={14} />
                 <Text style={styles.badgeLabel}>AI</Text>
-              </View>
+              </Pressable>
               <Pressable
                 style={({ pressed }) => [styles.historyButton, pressed && styles.historyButtonPressed]}
                 onPress={handleOpenHistory}
@@ -319,47 +549,72 @@ export function HomeScreen() {
               style={styles.textArea}
             />
             <Text style={styles.metricsText}>{formatMetrics(inputMetrics)}</Text>
-            <View style={styles.quickActionsRow}>
-              {QUICK_ACTIONS.map(({ id, label, icon: Icon }) => (
-                <Pressable
-                  key={id}
-                  style={({ pressed }) => [
-                    styles.quickAction,
-                    pressed && styles.quickActionPressed,
-                  ]}
-                  onPress={() => handleQuickAction(id)}
-                  disabled={id === 'camera' && isScanning}
-                >
-                  {id === 'camera' && isScanning ? (
-                    <ActivityIndicator color={colors.text} size="small" />
-                  ) : (
-                    <Icon color={colors.text} size={18} />
-                  )}
-                  <Text style={styles.quickActionLabel}>{label}</Text>
-                </Pressable>
-              ))}
-            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.quickActionsRow}
+            >
+              {QUICK_ACTIONS.map(({ id, label, icon: Icon }) => {
+                const isBusy =
+                  (id === 'camera' && isScanning) ||
+                  (id === 'document' && isDocumentLoading) ||
+                  (id === 'dictate' && isRecording);
+                return (
+                  <Pressable
+                    key={id}
+                    style={({ pressed }) => [
+                      styles.quickAction,
+                      isBusy && styles.quickActionActive,
+                      pressed && styles.quickActionPressed,
+                    ]}
+                    onPress={() => handleQuickAction(id)}
+                    disabled={(id === 'camera' && isScanning) || (id === 'document' && isDocumentLoading)}
+                  >
+                    {id === 'camera' && isScanning ? (
+                      <ActivityIndicator color={colors.text} size="small" />
+                    ) : id === 'document' && isDocumentLoading ? (
+                      <ActivityIndicator color={colors.text} size="small" />
+                    ) : id === 'dictate' && isRecording ? (
+                      <MicOff color={colors.glow} size={18} />
+                    ) : (
+                      <Icon color={colors.text} size={18} />
+                    )}
+                    <Text style={styles.quickActionLabel}>
+                      {id === 'dictate' && isRecording ? 'In ascolto…' : label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
           </Card>
 
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>Modalità</Text>
-            <View style={styles.toneGrid}>
-              {TONE_OPTIONS.map(({ id, icon: Icon }) => {
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.modeRow}
+            >
+              {allToneOptions.map(({ id, icon: Icon, label }) => {
                 const isSelected = selectedTone === id;
                 return (
                   <Pressable
                     key={id}
                     onPress={() => handleToneSelect(id)}
-                    style={[styles.toneCard, isSelected && styles.toneCardSelected]}
+                    style={[styles.modeChip, isSelected && styles.toneCardSelected]}
                   >
-                    <Icon color={isSelected ? colors.text : colors.textMuted} size={20} />
+                    <Icon color={isSelected ? colors.text : colors.textMuted} size={18} />
                     <Text style={[styles.toneLabel, isSelected && styles.toneLabelSelected]}>
-                      {MODE_LABELS[id]}
+                      {isBuiltinMode(id) ? MODE_LABELS[id] : label}
                     </Text>
                   </Pressable>
                 );
               })}
-            </View>
+              <Pressable style={styles.modeChipNew} onPress={handleOpenNewPrompt}>
+                <Plus color={colors.glow} size={18} />
+                <Text style={styles.modeChipNewLabel}>Nuovo</Text>
+              </Pressable>
+            </ScrollView>
           </View>
 
           <View style={styles.section}>
@@ -430,10 +685,13 @@ export function HomeScreen() {
           <Card style={styles.section}>
             <Text style={styles.sectionLabel}>Risultato</Text>
             <View style={styles.outputBox}>
-              {isProcessing ? (
+              {errorMessage ? (
+                <View style={styles.errorRow}>
+                  <TriangleAlert color={colors.danger} size={18} />
+                  <Text style={styles.outputError}>{errorMessage}</Text>
+                </View>
+              ) : isProcessing && !outputText ? (
                 <ActivityIndicator color={colors.glow} />
-              ) : errorMessage ? (
-                <Text style={styles.outputError}>{errorMessage}</Text>
               ) : (
                 <Text style={outputText ? styles.outputText : styles.outputPlaceholder}>
                   {outputText || 'Il testo rielaborato apparirà qui.'}
@@ -458,6 +716,23 @@ export function HomeScreen() {
                 )}
                 <Text style={styles.secondaryActionLabel}>
                   {isSpeaking ? 'Ferma' : 'Ascolta'}
+                </Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.secondaryAction,
+                  (!currentEntryId || pressed) && styles.secondaryActionDisabled,
+                ]}
+                onPress={handleToggleCurrentFavorite}
+                disabled={!currentEntryId}
+              >
+                <Star
+                  color={isCurrentFavorite ? colors.glow : colors.text}
+                  fill={isCurrentFavorite ? colors.glow : 'transparent'}
+                  size={18}
+                />
+                <Text style={styles.secondaryActionLabel}>
+                  {isCurrentFavorite ? 'Preferito' : 'Preferisci'}
                 </Text>
               </Pressable>
               <Pressable
@@ -493,6 +768,19 @@ export function HomeScreen() {
         onClose={() => setIsHistoryVisible(false)}
         entries={historyEntries}
         onSelectEntry={handleSelectHistoryEntry}
+        onDeleteEntry={handleDeleteHistoryEntry}
+        onToggleFavorite={handleToggleHistoryFavorite}
+      />
+      <SettingsModal
+        visible={isSettingsVisible}
+        onClose={() => setIsSettingsVisible(false)}
+        temperature={temperature}
+        onTemperatureChange={setTemperature}
+      />
+      <NewPromptModal
+        visible={isNewPromptVisible}
+        onClose={() => setIsNewPromptVisible(false)}
+        onSave={handleSaveNewPrompt}
       />
     </LinearGradient>
   );
@@ -567,6 +855,7 @@ const styles = StyleSheet.create({
   },
   textArea: {
     minHeight: 120,
+    maxHeight: 220,
     color: colors.text,
     ...typography.body,
     textAlignVertical: 'top',
@@ -582,17 +871,22 @@ const styles = StyleSheet.create({
   quickActionsRow: {
     flexDirection: 'row',
     gap: spacing.sm,
+    paddingRight: spacing.md,
   },
   quickAction: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.xs,
+    gap: spacing.sm,
     backgroundColor: colors.surfaceAlt,
-    borderRadius: radius.md,
+    borderRadius: radius.pill,
     ...glassBorder,
-    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  quickActionActive: {
+    backgroundColor: colors.glowMuted,
+    borderColor: colors.glowBorder,
   },
   quickActionPressed: {
     backgroundColor: colors.surfaceElevated,
@@ -603,26 +897,36 @@ const styles = StyleSheet.create({
     ...typography.caption,
     fontWeight: '600',
   },
-  toneGrid: {
+  modeRow: {
     flexDirection: 'row',
     gap: spacing.sm,
   },
-  toneCard: {
-    flex: 1,
+  modeChip: {
+    flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: radius.lg,
+    backgroundColor: colors.surface,
+    borderRadius: radius.pill,
     ...glassBorder,
-    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
   },
-  densityCard: {
-    flex: 1,
+  modeChipNew: {
+    flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: radius.lg,
-    ...glassBorder,
-    paddingVertical: spacing.md,
+    gap: spacing.xs,
+    backgroundColor: colors.glowMuted,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: colors.glowBorder,
+    borderStyle: 'dashed',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  modeChipNewLabel: {
+    color: colors.glow,
+    ...typography.body,
+    fontWeight: '700',
   },
   languageRow: {
     flexDirection: 'row',
@@ -635,6 +939,18 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     ...glassBorder,
     paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  toneGrid: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  densityCard: {
+    flex: 1,
+    alignItems: 'center',
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.lg,
+    ...glassBorder,
     paddingVertical: spacing.md,
   },
   toneCardSelected: {
@@ -691,7 +1007,13 @@ const styles = StyleSheet.create({
     ...typography.body,
     fontStyle: 'italic',
   },
+  errorRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+  },
   outputError: {
+    flex: 1,
     color: colors.danger,
     ...typography.body,
   },

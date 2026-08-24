@@ -24,8 +24,6 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
       ]
     },
@@ -44,6 +42,13 @@
         {
           "photosPermission": "Consenti a Smart Flow AI di accedere alle tue foto per la scansione OCR.",
           "cameraPermission": "Consenti a Smart Flow AI di accedere alla fotocamera per scansionare documenti e immagini."
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Consenti a Smart Flow AI di accedere al microfono per la dettatura vocale.",
+          "speechRecognitionPermission": "Consenti a Smart Flow AI di riconoscere il parlato per trascrivere la dettatura."
         }
       ]
     ],
