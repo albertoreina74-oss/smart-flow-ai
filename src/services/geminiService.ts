@@ -10,11 +10,14 @@ import {
 } from '../constants/prompts';
 
 export const GEMINI_MODEL = 'gemini-flash-latest';
-// Used as an automatic fallback the moment GEMINI_MODEL is unavailable —
-// overloaded (503/500), rate-limited or out of quota (429) — confirmed
-// working for this key. No point waiting on a struggling model: switch
-// immediately and let the next request try the primary model again.
-const FALLBACK_MODEL = 'gemini-3.6-flash';
+// Tried in order the moment GEMINI_MODEL is unavailable — overloaded
+// (503/500), rate-limited or out of quota (429). Each model has its own
+// separate free-tier daily quota bucket, so stacking multiple fallbacks
+// makes it far less likely all of them are exhausted at once. Every entry
+// here has been individually confirmed to respond for this API key.
+// No point waiting on a struggling model: switch immediately and let the
+// next request try the primary model again.
+const FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash-lite'];
 const GEMINI_API_ROOT = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 function apiUrl(model: string, action: string, apiKey: string): string {
@@ -120,17 +123,24 @@ async function fetchGenerateContent(model: string, apiKey: string, body: object)
  * - Any other error (auth, bad request, ...) fails immediately.
  */
 async function generateContentWithResilience(apiKey: string, body: object): Promise<string> {
-  try {
-    return await fetchGenerateContent(GEMINI_MODEL, apiKey, body);
-  } catch (error) {
-    if (!(error instanceof GeminiHttpError) || !isRetryableStatus(error.status)) {
-      throw error;
+  const chain = [GEMINI_MODEL, ...FALLBACK_MODELS];
+  let lastError: unknown;
+
+  for (const model of chain) {
+    try {
+      return await fetchGenerateContent(model, apiKey, body);
+    } catch (error) {
+      lastError = error;
+      if (!(error instanceof GeminiHttpError) || !isRetryableStatus(error.status)) {
+        throw error;
+      }
+      // This model is unavailable right now — move straight to the next
+      // one in the chain instead of waiting. Each is tried fresh again on
+      // the next user request.
     }
-    // Primary model is unavailable right now — switch to the fallback
-    // immediately instead of waiting. The primary is tried again fresh on
-    // the next request.
-    return fetchGenerateContent(FALLBACK_MODEL, apiKey, body);
   }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 export async function processText(

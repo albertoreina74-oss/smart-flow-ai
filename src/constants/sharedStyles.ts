@@ -1,0 +1,282 @@
+import { StyleSheet } from 'react-native';
+import { colors, glassBorder, glassShadow, radius, spacing, typography } from './theme';
+
+/**
+ * Style building blocks shared across every tab screen (Flow, Documenti,
+ * Traduci, Archivio): glass cards, chip rows, the process/copy buttons,
+ * output box, etc. Keeping them in one place avoids re-declaring the same
+ * ~200 lines of StyleSheet per screen.
+ */
+export const screenStyles = StyleSheet.create({
+  screen: {
+    flex: 1,
+  },
+  flex: {
+    flex: 1,
+  },
+  scrollContent: {
+    padding: spacing.lg,
+    gap: spacing.lg,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  headerTitle: {
+    color: colors.text,
+    ...typography.title,
+  },
+  headerSubtitle: {
+    color: colors.textMuted,
+    ...typography.body,
+    marginTop: 2,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.glowMuted,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    ...glassBorder,
+  },
+  iconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceAlt,
+    ...glassBorder,
+  },
+  iconButtonPressed: {
+    backgroundColor: colors.surfaceElevated,
+    borderColor: colors.borderStrong,
+  },
+  badgeLabel: {
+    color: colors.glow,
+    ...typography.caption,
+    fontWeight: '700',
+  },
+  section: {
+    gap: spacing.md,
+  },
+  sectionLabel: {
+    color: colors.textMuted,
+    ...typography.caption,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  textArea: {
+    minHeight: 120,
+    maxHeight: 220,
+    color: colors.text,
+    ...typography.body,
+    textAlignVertical: 'top',
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md,
+    ...glassBorder,
+    padding: spacing.md,
+  },
+  metricsText: {
+    color: colors.textMuted,
+    ...typography.caption,
+  },
+  actionsRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingRight: spacing.md,
+  },
+  actionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.pill,
+    ...glassBorder,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  actionChipActive: {
+    backgroundColor: colors.glowMuted,
+    borderColor: colors.glowBorder,
+  },
+  actionChipPressed: {
+    backgroundColor: colors.surfaceElevated,
+    borderColor: colors.borderStrong,
+  },
+  actionChipLabel: {
+    color: colors.text,
+    ...typography.caption,
+    fontWeight: '600',
+  },
+  chipRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.surface,
+    borderRadius: radius.pill,
+    ...glassBorder,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  chipNew: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.glowMuted,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: colors.glowBorder,
+    borderStyle: 'dashed',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  chipNewLabel: {
+    color: colors.glow,
+    ...typography.body,
+    fontWeight: '700',
+  },
+  pillRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  pill: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.pill,
+    ...glassBorder,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  optionGrid: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  optionCard: {
+    flex: 1,
+    alignItems: 'center',
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.lg,
+    ...glassBorder,
+    paddingVertical: spacing.md,
+  },
+  optionSelected: {
+    backgroundColor: colors.glowMuted,
+    borderColor: colors.glowBorder,
+    ...glassShadow,
+  },
+  optionLabel: {
+    color: colors.textMuted,
+    ...typography.body,
+    fontWeight: '600',
+  },
+  optionLabelSelected: {
+    color: colors.text,
+  },
+  primaryButtonWrapper: {
+    borderRadius: radius.md,
+    shadowColor: colors.glow,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  primaryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+  },
+  primaryButtonDisabled: {
+    opacity: 0.5,
+  },
+  primaryButtonLabel: {
+    color: colors.textOnPrimary,
+    ...typography.subtitle,
+    fontWeight: '700',
+  },
+  outputBox: {
+    minHeight: 100,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md,
+    ...glassBorder,
+    padding: spacing.md,
+    justifyContent: 'center',
+  },
+  outputText: {
+    color: colors.text,
+    ...typography.body,
+  },
+  outputPlaceholder: {
+    color: colors.textMuted,
+    ...typography.body,
+    fontStyle: 'italic',
+  },
+  errorRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+  },
+  outputError: {
+    flex: 1,
+    color: colors.danger,
+    ...typography.body,
+  },
+  secondaryAction: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md,
+    ...glassBorder,
+    paddingVertical: spacing.sm,
+  },
+  secondaryActionDisabled: {
+    opacity: 0.5,
+  },
+  secondaryActionLabel: {
+    color: colors.text,
+    ...typography.caption,
+    fontWeight: '600',
+  },
+  primaryFilledButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    shadowColor: colors.glow,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 14,
+    elevation: 10,
+  },
+  primaryFilledButtonPressed: {
+    opacity: 0.5,
+  },
+  primaryFilledButtonLabel: {
+    color: colors.textOnPrimary,
+    ...typography.subtitle,
+    fontWeight: '700',
+  },
+});

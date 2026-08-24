@@ -40,6 +40,19 @@ export const LANGUAGE_SPEECH_LOCALES: Record<Language, string> = {
   it: 'it-IT',
 };
 
+export type SourceLanguage = 'auto' | Language;
+export type TranslationRegister = 'natural' | 'formal';
+
+export const SOURCE_LANGUAGE_OPTIONS: { id: SourceLanguage; label: string }[] = [
+  { id: 'auto', label: '🌐 Rileva' },
+  ...LANGUAGE_OPTIONS,
+];
+
+export const REGISTER_LABELS: Record<TranslationRegister, string> = {
+  natural: 'Naturale',
+  formal: 'Formale',
+};
+
 export const SYSTEM_PROMPTS: Record<NonTranslateMode, string> = {
   clean: `Correggi solo i refusi di dettatura e la punteggiatura del testo fornito, senza alterarne lo stile, il tono o il significato originale. Restituisci esclusivamente il testo corretto, senza commenti o premesse aggiuntive.`,
   formal: `Rielabora il testo fornito in un italiano formale e professionale, adatto a comunicazioni di lavoro. Mantieni il significato originale. Restituisci esclusivamente il testo rielaborato, senza commenti o premesse aggiuntive.`,
@@ -51,8 +64,17 @@ export const DENSITY_MODIFIERS: Record<Density, string> = {
   detailed: `Fornisci maggiori dettagli e contesto dove utile, senza essere prolisso.`,
 };
 
-export function buildTranslatePrompt(language: Language): string {
-  return `Traduci fedelmente il testo fornito in ${LANGUAGE_NAMES[language]}, mantenendo il più possibile la formattazione originale (interruzioni di riga, elenchi puntati, paragrafi). Restituisci esclusivamente il testo tradotto, senza commenti o premesse aggiuntive.`;
+export function buildTranslatePrompt(
+  targetLanguage: Language,
+  sourceLanguage: SourceLanguage = 'auto',
+  register: TranslationRegister = 'natural',
+): string {
+  const sourceClause = sourceLanguage === 'auto' ? '' : ` dal ${LANGUAGE_NAMES[sourceLanguage]}`;
+  const registerClause =
+    register === 'formal'
+      ? ' Usa un registro formale e professionale.'
+      : ' Usa un registro naturale e scorrevole.';
+  return `Traduci fedelmente il testo fornito${sourceClause} in ${LANGUAGE_NAMES[targetLanguage]}, mantenendo il più possibile la formattazione originale (interruzioni di riga, elenchi puntati, paragrafi).${registerClause} Restituisci esclusivamente il testo tradotto, senza commenti o premesse aggiuntive.`;
 }
 
 export const SYSTEM_PROMPT_OCR = `Estrai il testo dall'immagine fornita nel modo più fedele possibile, mantenendo la formattazione originale dove ragionevole.`;

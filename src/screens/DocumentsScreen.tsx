@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -17,86 +18,56 @@ import { StatusBar } from 'expo-status-bar';
 import * as Haptics from 'expo-haptics';
 import * as Speech from 'expo-speech';
 import {
-  ExpoSpeechRecognitionModule,
-  useSpeechRecognitionEvent,
-} from 'expo-speech-recognition';
-import {
   Briefcase,
-  ClipboardPaste,
+  Camera,
   Copy,
   FileDown,
   FileText,
   ListChecks,
-  Mic,
-  MicOff,
-  Plus,
   Share2,
   Sparkles,
   Star,
-  Trash2,
   TriangleAlert,
   Volume2,
   VolumeX,
   WandSparkles,
 } from 'lucide-react-native';
 import { Card } from '../components/Card';
-import { NewPromptModal } from '../components/NewPromptModal';
-import { SettingsModal } from '../components/SettingsModal';
 import { Toast } from '../components/Toast';
 import { colors, gradient, spacing } from '../constants/theme';
 import { screenStyles as s } from '../constants/sharedStyles';
-import { DENSITY_LABELS, Density, MODE_LABELS, ProcessMode } from '../constants/prompts';
-import { getFriendlyErrorMessage } from '../services/geminiService';
-import { readClipboard, writeClipboard } from '../services/clipboardService';
-import { exportResultAsMarkdown, exportResultAsPdf } from '../services/exportService';
-import { authenticateWithBiometrics, isBiometricAvailable } from '../services/biometricService';
+import { DENSITY_LABELS, Density, MODE_LABELS, NonTranslateMode } from '../constants/prompts';
 import {
-  addCustomPrompt,
-  CustomPrompt,
-  getBiometricLockEnabled,
-  getCustomPrompts,
-  setBiometricLockEnabled,
-} from '../services/storageService';
+  extractTextFromDocument,
+  extractTextFromImage,
+  getFriendlyErrorMessage,
+} from '../services/geminiService';
+import { writeClipboard } from '../services/clipboardService';
+import { pickImageFromCamera, pickImageFromLibrary } from '../services/imagePickerService';
+import { pickDocument } from '../services/documentService';
+import { exportResultAsMarkdown, exportResultAsPdf } from '../services/exportService';
 import { useGeminiProcessing } from '../hooks/useGeminiProcessing';
 import { computeMetrics, formatMetrics } from '../utils/textMetrics';
 
-const BUILTIN_TONE_OPTIONS: { id: ProcessMode; icon: typeof WandSparkles }[] = [
+const TONE_OPTIONS: { id: NonTranslateMode; icon: typeof WandSparkles }[] = [
   { id: 'clean', icon: WandSparkles },
   { id: 'formal', icon: Briefcase },
   { id: 'summary', icon: ListChecks },
 ];
 
-const BUILTIN_MODE_IDS: string[] = BUILTIN_TONE_OPTIONS.map((option) => option.id);
-
-function isBuiltinMode(id: string): id is ProcessMode {
-  return BUILTIN_MODE_IDS.includes(id);
-}
-
 const DENSITY_OPTIONS: Density[] = ['essential', 'detailed'];
-
-const QUICK_ACTIONS: { id: string; label: string; icon: typeof ClipboardPaste }[] = [
-  { id: 'paste', label: 'Incolla', icon: ClipboardPaste },
-  { id: 'clear', label: 'Cancella', icon: Trash2 },
-  { id: 'dictate', label: 'Dettatura', icon: Mic },
-];
-
 const TOAST_DURATION_MS = 1800;
 
-export function HomeScreen() {
+export function DocumentsScreen() {
   const insets = useSafeAreaInsets();
-  const [inputText, setInputText] = useState('');
-  const [selectedTone, setSelectedTone] = useState<string>('clean');
+  const [extractedText, setExtractedText] = useState('');
+  const [selectedTone, setSelectedTone] = useState<NonTranslateMode>('clean');
   const [selectedDensity, setSelectedDensity] = useState<Density>('essential');
-  const [temperature, setTemperature] = useState(0.7);
-  const [isRecording, setIsRecording] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [isDocumentLoading, setIsDocumentLoading] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [toastMessage, setToastMessage] = useState('');
-  const [isSettingsVisible, setIsSettingsVisible] = useState(false);
-  const [isNewPromptVisible, setIsNewPromptVisible] = useState(false);
-  const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>([]);
   const [isExporting, setIsExporting] = useState<'pdf' | 'markdown' | null>(null);
-  const [isBiometricEnabled, setIsBiometricEnabled] = useState(false);
-  const [isBiometricHardwareAvailable, setIsBiometricHardwareAvailable] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
 
   const {
     outputText,
@@ -109,84 +80,61 @@ export function HomeScreen() {
     toggleFavorite,
   } = useGeminiProcessing();
 
-  useEffect(() => {
-    getCustomPrompts().then(setCustomPrompts);
-  }, []);
-
-  useEffect(() => {
-    isBiometricAvailable().then(setIsBiometricHardwareAvailable);
-    getBiometricLockEnabled().then(setIsBiometricEnabled);
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      Speech.stop();
-    };
-  }, []);
-
-  useSpeechRecognitionEvent('result', (event) => {
-    const transcript = event.results[0]?.transcript;
-    if (transcript) {
-      setInputText(transcript);
-    }
-  });
-
-  useSpeechRecognitionEvent('end', () => {
-    setIsRecording(false);
-  });
-
-  useSpeechRecognitionEvent('error', (event) => {
-    setIsRecording(false);
-    setErrorMessage(getFriendlyErrorMessage(new Error(event.message || event.error)));
-  });
-
   const showToast = (message: string) => {
     setToastMessage(message);
     setTimeout(() => setToastMessage(''), TOAST_DURATION_MS);
   };
 
-  const handleToggleDictation = async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (isRecording) {
-      ExpoSpeechRecognitionModule.stop();
-      setIsRecording(false);
-      return;
-    }
+  const runImageScan = async (source: 'camera' | 'library') => {
+    setIsScanning(true);
+    setErrorMessage('');
     try {
-      const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-      if (!permission.granted) {
-        setErrorMessage('Permesso microfono negato. Abilitalo nelle impostazioni per usare la dettatura.');
+      const image = source === 'camera' ? await pickImageFromCamera() : await pickImageFromLibrary();
+      if (!image) {
         return;
       }
-      setErrorMessage('');
-      setIsRecording(true);
-      ExpoSpeechRecognitionModule.start({ lang: 'it-IT', interimResults: true, continuous: true });
+      const text = await extractTextFromImage(image.base64, image.mimeType);
+      setExtractedText(text);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      setIsRecording(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setErrorMessage(getFriendlyErrorMessage(error));
+    } finally {
+      setIsScanning(false);
     }
   };
 
-  const handleQuickAction = async (id: string) => {
+  const handleCameraPress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (id === 'clear') {
-      setInputText('');
-      setErrorMessage('');
-      return;
-    }
-    if (id === 'paste') {
-      const clipboardText = await readClipboard();
-      if (clipboardText) {
-        setInputText(clipboardText);
+    Alert.alert('Scansiona testo', "Scegli la sorgente dell'immagine", [
+      { text: 'Scatta foto', onPress: () => runImageScan('camera') },
+      { text: 'Scegli dalla libreria', onPress: () => runImageScan('library') },
+      { text: 'Annulla', style: 'cancel' },
+    ]);
+  };
+
+  const handleDocumentPress = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setIsDocumentLoading(true);
+    setErrorMessage('');
+    try {
+      const picked = await pickDocument();
+      if (!picked) {
+        return;
       }
-      return;
-    }
-    if (id === 'dictate') {
-      handleToggleDictation();
+      const text =
+        picked.kind === 'text' ? picked.text : await extractTextFromDocument(picked.base64, picked.mimeType);
+      setExtractedText(text);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setErrorMessage(getFriendlyErrorMessage(error));
+    } finally {
+      setIsDocumentLoading(false);
     }
   };
 
-  const handleToneSelect = (tone: string) => {
+  const handleToneSelect = (tone: NonTranslateMode) => {
     Haptics.selectionAsync();
     setSelectedTone(tone);
   };
@@ -197,24 +145,9 @@ export function HomeScreen() {
   };
 
   const handleProcess = () => {
-    const isCustom = !isBuiltinMode(selectedTone);
-    const customPrompt = isCustom
-      ? customPrompts.find((prompt) => `custom:${prompt.id}` === selectedTone)?.prompt
-      : undefined;
-    const modeLabel = isCustom
-      ? customPrompts.find((prompt) => `custom:${prompt.id}` === selectedTone)?.label ??
-        'Personalizzata'
-      : MODE_LABELS[selectedTone as ProcessMode];
     Speech.stop();
     setIsSpeaking(false);
-    runProcessing(
-      inputText,
-      isCustom ? 'clean' : (selectedTone as ProcessMode),
-      selectedDensity,
-      'it',
-      modeLabel,
-      { customPrompt, temperature },
-    );
+    runProcessing(extractedText, selectedTone, selectedDensity, 'it', MODE_LABELS[selectedTone]);
   };
 
   const handleCopyResult = async () => {
@@ -260,39 +193,6 @@ export function HomeScreen() {
     }
   };
 
-  const handleOpenSettings = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setIsSettingsVisible(true);
-  };
-
-  const handleOpenNewPrompt = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setIsNewPromptVisible(true);
-  };
-
-  const handleSaveNewPrompt = async (label: string, prompt: string) => {
-    const updated = await addCustomPrompt(label, prompt);
-    setCustomPrompts(updated);
-    setIsNewPromptVisible(false);
-    const newPrompt = updated[updated.length - 1];
-    if (newPrompt) {
-      setSelectedTone(`custom:${newPrompt.id}`);
-    }
-    showToast('Modalità salvata');
-  };
-
-  const handleToggleBiometric = async (enabled: boolean) => {
-    if (enabled) {
-      const authenticated = await authenticateWithBiometrics('Conferma per attivare il blocco dell\'archivio');
-      if (!authenticated) {
-        return;
-      }
-    }
-    setIsBiometricEnabled(enabled);
-    await setBiometricLockEnabled(enabled);
-    showToast(enabled ? 'Blocco biometrico attivato' : 'Blocco biometrico disattivato');
-  };
-
   const handleExportPdf = async () => {
     if (!outputText || isExporting) {
       return;
@@ -323,17 +223,9 @@ export function HomeScreen() {
     }
   };
 
-  const canProcess = inputText.trim().length > 0 && !isProcessing;
-  const inputMetrics = computeMetrics(inputText);
+  const canProcess = extractedText.trim().length > 0 && !isProcessing;
+  const metrics = computeMetrics(extractedText);
   const outputMetrics = computeMetrics(outputText);
-  const allToneOptions: { id: string; icon: typeof WandSparkles; label?: string }[] = [
-    ...BUILTIN_TONE_OPTIONS,
-    ...customPrompts.map((prompt) => ({
-      id: `custom:${prompt.id}`,
-      icon: Sparkles,
-      label: prompt.label,
-    })),
-  ];
 
   return (
     <LinearGradient colors={gradient.background} style={s.screen}>
@@ -345,80 +237,82 @@ export function HomeScreen() {
         >
           <View style={s.header}>
             <View>
-              <Text style={s.headerTitle}>Smart Flow</Text>
-              <Text style={s.headerSubtitle}>Rielabora il testo in un tocco</Text>
-            </View>
-            <View style={s.headerActions}>
-              <Pressable
-                style={({ pressed }) => [s.badge, pressed && s.iconButtonPressed]}
-                onPress={handleOpenSettings}
-                hitSlop={8}
-              >
-                <Sparkles color={colors.glow} size={14} />
-                <Text style={s.badgeLabel}>AI</Text>
-              </Pressable>
+              <Text style={s.headerTitle}>Documenti & OCR</Text>
+              <Text style={s.headerSubtitle}>Importa PDF, TXT o scansiona una foto</Text>
             </View>
           </View>
 
+          <View style={s.optionGrid}>
+            <Pressable
+              style={({ pressed }) => [
+                s.optionCard,
+                styles.sourceCard,
+                pressed && s.actionChipPressed,
+                isDocumentLoading && s.optionSelected,
+              ]}
+              onPress={handleDocumentPress}
+              disabled={isDocumentLoading}
+            >
+              {isDocumentLoading ? (
+                <ActivityIndicator color={colors.text} />
+              ) : (
+                <FileText color={colors.glow} size={26} />
+              )}
+              <Text style={styles.sourceLabel}>Documento</Text>
+              <Text style={styles.sourceHint}>PDF · TXT</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [
+                s.optionCard,
+                styles.sourceCard,
+                pressed && s.actionChipPressed,
+                isScanning && s.optionSelected,
+              ]}
+              onPress={handleCameraPress}
+              disabled={isScanning}
+            >
+              {isScanning ? (
+                <ActivityIndicator color={colors.text} />
+              ) : (
+                <Camera color={colors.glow} size={26} />
+              )}
+              <Text style={styles.sourceLabel}>Fotocamera</Text>
+              <Text style={styles.sourceHint}>Scansione OCR</Text>
+            </Pressable>
+          </View>
+
           <Card style={s.section}>
-            <Text style={s.sectionLabel}>Testo di partenza</Text>
+            <Text style={s.sectionLabel}>Testo estratto</Text>
             <TextInput
-              value={inputText}
-              onChangeText={setInputText}
-              placeholder="Scrivi o incolla qui il testo da elaborare..."
+              value={extractedText}
+              onChangeText={setExtractedText}
+              placeholder="Il testo importato apparirà qui, modificabile prima della rielaborazione..."
               placeholderTextColor={colors.textMuted}
               multiline
               style={s.textArea}
             />
-            <Text style={s.metricsText}>{formatMetrics(inputMetrics)}</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.actionsRow}>
-              {QUICK_ACTIONS.map(({ id, label, icon: Icon }) => {
-                const isActive = id === 'dictate' && isRecording;
-                return (
-                  <Pressable
-                    key={id}
-                    style={({ pressed }) => [
-                      s.actionChip,
-                      isActive && s.actionChipActive,
-                      pressed && s.actionChipPressed,
-                    ]}
-                    onPress={() => handleQuickAction(id)}
-                  >
-                    {isActive ? (
-                      <MicOff color={colors.glow} size={18} />
-                    ) : (
-                      <Icon color={colors.text} size={18} />
-                    )}
-                    <Text style={s.actionChipLabel}>{isActive ? 'In ascolto…' : label}</Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
+            <Text style={s.metricsText}>{formatMetrics(metrics)}</Text>
           </Card>
 
           <View style={s.section}>
             <Text style={s.sectionLabel}>Modalità</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chipRow}>
-              {allToneOptions.map(({ id, icon: Icon, label }) => {
+            <View style={s.optionGrid}>
+              {TONE_OPTIONS.map(({ id, icon: Icon }) => {
                 const isSelected = selectedTone === id;
                 return (
                   <Pressable
                     key={id}
                     onPress={() => handleToneSelect(id)}
-                    style={[s.chip, isSelected && s.optionSelected]}
+                    style={[s.optionCard, isSelected && s.optionSelected]}
                   >
                     <Icon color={isSelected ? colors.text : colors.textMuted} size={18} />
                     <Text style={[s.optionLabel, isSelected && s.optionLabelSelected]}>
-                      {isBuiltinMode(id) ? MODE_LABELS[id] : label}
+                      {MODE_LABELS[id]}
                     </Text>
                   </Pressable>
                 );
               })}
-              <Pressable style={s.chipNew} onPress={handleOpenNewPrompt}>
-                <Plus color={colors.glow} size={18} />
-                <Text style={s.chipNewLabel}>Nuovo</Text>
-              </Pressable>
-            </ScrollView>
+            </View>
           </View>
 
           <View style={s.section}>
@@ -559,25 +453,24 @@ export function HomeScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
       <Toast message={toastMessage} visible={Boolean(toastMessage)} />
-      <SettingsModal
-        visible={isSettingsVisible}
-        onClose={() => setIsSettingsVisible(false)}
-        temperature={temperature}
-        onTemperatureChange={setTemperature}
-        isBiometricEnabled={isBiometricEnabled}
-        isBiometricAvailable={isBiometricHardwareAvailable}
-        onToggleBiometric={handleToggleBiometric}
-      />
-      <NewPromptModal
-        visible={isNewPromptVisible}
-        onClose={() => setIsNewPromptVisible(false)}
-        onSave={handleSaveNewPrompt}
-      />
     </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
+  sourceCard: {
+    gap: spacing.xs,
+  },
+  sourceLabel: {
+    color: colors.text,
+    fontWeight: '700',
+    fontSize: 15,
+    marginTop: spacing.xs,
+  },
+  sourceHint: {
+    color: colors.textMuted,
+    fontSize: 12,
+  },
   tabBarSpacer: {
     height: 96,
   },
