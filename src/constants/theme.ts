@@ -1,25 +1,26 @@
 export const gradient = {
-  background: ['#1E1B4B', '#4C1D95', '#0F172A'] as const,
-  action: ['#007AFF', '#00F0FF'] as const,
+  background: ['#E7EEE3', '#F7F6F1'] as const,
+  action: ['#1A1A1A', '#0A0A0A'] as const,
 };
 
 export const colors = {
-  background: '#0F172A',
-  surface: 'rgba(255, 255, 255, 0.12)',
-  surfaceElevated: 'rgba(255, 255, 255, 0.18)',
-  surfaceAlt: 'rgba(15, 23, 42, 0.4)',
-  primary: '#007AFF',
-  primaryMuted: 'rgba(0, 122, 255, 0.2)',
-  glow: '#00F0FF',
-  glowMuted: 'rgba(0, 240, 255, 0.2)',
-  glowBorder: 'rgba(0, 240, 255, 0.8)',
-  text: '#FFFFFF',
-  textMuted: '#E2E8F0',
-  border: 'rgba(255, 255, 255, 0.3)',
-  borderStrong: 'rgba(255, 255, 255, 0.4)',
-  borderTopHighlight: 'rgba(255, 255, 255, 0.65)',
-  danger: '#FF453A',
-  success: '#30D158',
+  background: '#F7F6F1',
+  surface: '#FFFFFF',
+  surfaceElevated: '#FFFFFF',
+  surfaceAlt: '#EEEDE7',
+  primary: '#171717',
+  primaryMuted: '#EEEDE7',
+  glow: '#171717',
+  glowMuted: '#FFFFFF',
+  glowBorder: 'rgba(23, 23, 23, 0.1)',
+  text: '#1C1F1B',
+  textMuted: '#8B9088',
+  textOnPrimary: '#FFFFFF',
+  border: 'rgba(28, 31, 27, 0.08)',
+  borderStrong: 'rgba(28, 31, 27, 0.14)',
+  borderTopHighlight: 'rgba(28, 31, 27, 0.08)',
+  danger: '#D92D20',
+  success: '#12805C',
 };
 
 export const spacing = {
@@ -47,21 +48,21 @@ export const typography = {
 export const glassShadow = {
   shadowColor: '#000000',
   shadowOffset: { width: 0, height: 8 },
-  shadowOpacity: 0.35,
-  shadowRadius: 16,
-  elevation: 8,
+  shadowOpacity: 0.06,
+  shadowRadius: 20,
+  elevation: 4,
 };
 
 export const glowShadow = {
-  shadowColor: colors.glow,
-  shadowOffset: { width: 0, height: 0 },
-  shadowOpacity: 0.5,
-  shadowRadius: 10,
-  elevation: 10,
+  shadowColor: '#000000',
+  shadowOffset: { width: 0, height: 6 },
+  shadowOpacity: 0.18,
+  shadowRadius: 14,
+  elevation: 8,
 };
 
 export const glassBorder = {
-  borderWidth: 1.5,
+  borderWidth: 1,
   borderColor: colors.border,
   borderTopColor: colors.borderTopHighlight,
 };

@@ -34,7 +34,15 @@ import {
 import { Card } from '../components/Card';
 import { HistoryModal } from '../components/HistoryModal';
 import { Toast } from '../components/Toast';
-import { colors, glassBorder, gradient, radius, spacing, typography } from '../constants/theme';
+import {
+  colors,
+  glassBorder,
+  glassShadow,
+  gradient,
+  radius,
+  spacing,
+  typography,
+} from '../constants/theme';
 import { DENSITY_LABELS, Density, MODE_LABELS, ProcessMode } from '../constants/prompts';
 import { extractTextFromImage, processText } from '../services/geminiService';
 import { readClipboard, writeClipboard } from '../services/clipboardService';
@@ -253,7 +261,7 @@ export function HomeScreen() {
 
   return (
     <LinearGradient colors={gradient.background} style={styles.screen}>
-      <StatusBar style="light" />
+      <StatusBar style="dark" />
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -369,9 +377,9 @@ export function HomeScreen() {
           >
             <LinearGradient colors={gradient.action} style={styles.processButton}>
               {isProcessing ? (
-                <ActivityIndicator color={colors.text} />
+                <ActivityIndicator color={colors.textOnPrimary} />
               ) : (
-                <Sparkles color={colors.text} size={18} />
+                <Sparkles color={colors.textOnPrimary} size={18} />
               )}
               <Text style={styles.processButtonLabel}>
                 {isProcessing ? 'Elaborazione...' : 'Rielabora testo'}
@@ -433,7 +441,7 @@ export function HomeScreen() {
               onPress={handleCopyResult}
               disabled={!outputText}
             >
-              <Copy color={colors.text} size={20} />
+              <Copy color={colors.textOnPrimary} size={20} />
               <Text style={styles.copyButtonLabel}>Copia Risultato</Text>
             </Pressable>
           </Card>
@@ -563,7 +571,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     gap: spacing.xs,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surfaceAlt,
     borderRadius: radius.lg,
     ...glassBorder,
     paddingVertical: spacing.md,
@@ -571,7 +579,7 @@ const styles = StyleSheet.create({
   densityCard: {
     flex: 1,
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surfaceAlt,
     borderRadius: radius.lg,
     ...glassBorder,
     paddingVertical: spacing.md,
@@ -579,6 +587,7 @@ const styles = StyleSheet.create({
   toneCardSelected: {
     backgroundColor: colors.glowMuted,
     borderColor: colors.glowBorder,
+    ...glassShadow,
   },
   toneLabel: {
     color: colors.textMuted,
@@ -608,7 +617,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   processButtonLabel: {
-    color: colors.text,
+    color: colors.textOnPrimary,
     ...typography.subtitle,
     fontWeight: '700',
   },
@@ -674,7 +683,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   copyButtonLabel: {
-    color: colors.text,
+    color: colors.textOnPrimary,
     ...typography.subtitle,
     fontWeight: '700',
   },

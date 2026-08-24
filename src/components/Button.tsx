@@ -26,7 +26,7 @@ export function Button({ label, onPress, variant = 'primary', style, disabled }:
         style={[styles.primaryWrapper, disabled && styles.disabled, style]}
       >
         <LinearGradient colors={gradient.action} style={styles.base}>
-          <Text style={styles.label}>{label}</Text>
+          <Text style={styles.labelOnPrimary}>{label}</Text>
         </LinearGradient>
       </Pressable>
     );
@@ -64,6 +64,10 @@ const styles = StyleSheet.create({
   },
   label: {
     color: colors.text,
+    ...typography.subtitle,
+  },
+  labelOnPrimary: {
+    color: colors.textOnPrimary,
     ...typography.subtitle,
   },
 });
