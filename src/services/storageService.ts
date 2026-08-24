@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const HISTORY_KEY = '@smart-flow-ai/history';
 const CUSTOM_PROMPTS_KEY = '@smart-flow-ai/custom-prompts';
+const BIOMETRIC_LOCK_KEY = '@smart-flow-ai/biometric-lock';
 const MAX_HISTORY_ENTRIES = 50;
 
 export type HistoryEntry = {
@@ -84,4 +85,13 @@ export async function deleteCustomPrompt(id: string): Promise<CustomPrompt[]> {
   const updated = existing.filter((prompt) => prompt.id !== id);
   await AsyncStorage.setItem(CUSTOM_PROMPTS_KEY, JSON.stringify(updated));
   return updated;
+}
+
+export async function getBiometricLockEnabled(): Promise<boolean> {
+  const raw = await AsyncStorage.getItem(BIOMETRIC_LOCK_KEY);
+  return raw === 'true';
+}
+
+export async function setBiometricLockEnabled(enabled: boolean): Promise<void> {
+  await AsyncStorage.setItem(BIOMETRIC_LOCK_KEY, enabled ? 'true' : 'false');
 }

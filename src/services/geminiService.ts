@@ -10,11 +10,12 @@ import {
 } from '../constants/prompts';
 
 export const GEMINI_MODEL = 'gemini-flash-latest';
-// Used only as an automatic fallback when GEMINI_MODEL is transiently
-// overloaded (503) or rate-limited (429) — confirmed working for this key.
+// Used as an automatic fallback the moment GEMINI_MODEL is unavailable —
+// overloaded (503/500), rate-limited or out of quota (429) — confirmed
+// working for this key. No point waiting on a struggling model: switch
+// immediately and let the next request try the primary model again.
 const FALLBACK_MODEL = 'gemini-3.6-flash';
 const GEMINI_API_ROOT = 'https://generativelanguage.googleapis.com/v1beta/models';
-const RETRY_DELAY_MS = 1200;
 
 function apiUrl(model: string, action: string, apiKey: string): string {
   return `${GEMINI_API_ROOT}/${model}:${action}?key=${apiKey}`;
@@ -22,18 +23,6 @@ function apiUrl(model: string, action: string, apiKey: string): string {
 
 function isRetryableStatus(status: number): boolean {
   return status === 429 || status === 503 || status === 500;
-}
-
-// A 429 (quota exhausted / rate limited) will not resolve itself by retrying
-// the same model — only switching model (a separate quota bucket) helps.
-// A 500/503 (transient overload) is worth one quick retry on the same model
-// before giving up on it.
-function isSameModelRetryWorthy(status: number): boolean {
-  return status === 503 || status === 500;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export type ProcessOptions = {
@@ -131,32 +120,16 @@ async function fetchGenerateContent(model: string, apiKey: string, body: object)
  * - Any other error (auth, bad request, ...) fails immediately.
  */
 async function generateContentWithResilience(apiKey: string, body: object): Promise<string> {
-  let lastError: unknown;
-
   try {
     return await fetchGenerateContent(GEMINI_MODEL, apiKey, body);
   } catch (error) {
-    lastError = error;
     if (!(error instanceof GeminiHttpError) || !isRetryableStatus(error.status)) {
       throw error;
     }
-    if (isSameModelRetryWorthy(error.status)) {
-      await delay(RETRY_DELAY_MS);
-      try {
-        return await fetchGenerateContent(GEMINI_MODEL, apiKey, body);
-      } catch (retryError) {
-        lastError = retryError;
-        if (!(retryError instanceof GeminiHttpError) || !isRetryableStatus(retryError.status)) {
-          throw retryError;
-        }
-      }
-    }
-  }
-
-  try {
-    return await fetchGenerateContent(FALLBACK_MODEL, apiKey, body);
-  } catch (error) {
-    throw error instanceof Error ? error : (lastError instanceof Error ? lastError : new Error(String(error)));
+    // Primary model is unavailable right now — switch to the fallback
+    // immediately instead of waiting. The primary is tried again fresh on
+    // the next request.
+    return fetchGenerateContent(FALLBACK_MODEL, apiKey, body);
   }
 }
 

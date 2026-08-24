@@ -50,6 +50,13 @@
           "microphonePermission": "Consenti a Smart Flow AI di accedere al microfono per la dettatura vocale.",
           "speechRecognitionPermission": "Consenti a Smart Flow AI di riconoscere il parlato per trascrivere la dettatura."
         }
+      ],
+      "expo-sharing",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Consenti a Smart Flow AI di usare Face ID per proteggere l'accesso allo storico."
+        }
       ]
     ],
     "extra": {

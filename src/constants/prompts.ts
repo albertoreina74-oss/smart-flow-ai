@@ -31,6 +31,15 @@ export const LANGUAGE_NAMES: Record<Language, string> = {
   it: 'italiano',
 };
 
+/** BCP-47 locale codes used to pick the system voice for text-to-speech. */
+export const LANGUAGE_SPEECH_LOCALES: Record<Language, string> = {
+  en: 'en-US',
+  es: 'es-ES',
+  fr: 'fr-FR',
+  de: 'de-DE',
+  it: 'it-IT',
+};
+
 export const SYSTEM_PROMPTS: Record<NonTranslateMode, string> = {
   clean: `Correggi solo i refusi di dettatura e la punteggiatura del testo fornito, senza alterarne lo stile, il tono o il significato originale. Restituisci esclusivamente il testo corretto, senza commenti o premesse aggiuntive.`,
   formal: `Rielabora il testo fornito in un italiano formale e professionale, adatto a comunicazioni di lavoro. Mantieni il significato originale. Restituisci esclusivamente il testo rielaborato, senza commenti o premesse aggiuntive.`,

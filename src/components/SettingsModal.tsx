@@ -1,9 +1,10 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Switch, Text, View } from 'react-native';
 import Slider from '@react-native-community/slider';
 import * as Haptics from 'expo-haptics';
+import { ShieldCheck } from 'lucide-react-native';
 import { GEMINI_MODEL } from '../services/geminiService';
-import { colors, radius, spacing, typography } from '../constants/theme';
+import { colors, glassBorder, radius, spacing, typography } from '../constants/theme';
 import { AppModal } from './Modal';
 
 type SettingsModalProps = {
@@ -11,6 +12,9 @@ type SettingsModalProps = {
   onClose: () => void;
   temperature: number;
   onTemperatureChange: (value: number) => void;
+  isBiometricEnabled: boolean;
+  isBiometricAvailable: boolean;
+  onToggleBiometric: (value: boolean) => void;
 };
 
 function describeTemperature(value: number): string {
@@ -28,6 +32,9 @@ export function SettingsModal({
   onClose,
   temperature,
   onTemperatureChange,
+  isBiometricEnabled,
+  isBiometricAvailable,
+  onToggleBiometric,
 }: SettingsModalProps) {
   return (
     <AppModal visible={visible} onClose={onClose}>
@@ -59,6 +66,30 @@ export function SettingsModal({
       <View style={styles.sliderScale}>
         <Text style={styles.scaleLabel}>Precisa</Text>
         <Text style={styles.scaleLabel}>Creativa</Text>
+      </View>
+
+      <View style={styles.biometricRow}>
+        <View style={styles.biometricInfo}>
+          <ShieldCheck color={colors.glow} size={18} />
+          <View style={styles.biometricTextGroup}>
+            <Text style={styles.biometricLabel}>Blocco Face ID / Touch ID</Text>
+            <Text style={styles.biometricHint}>
+              {isBiometricAvailable
+                ? 'Richiede autenticazione per aprire lo storico.'
+                : 'Non disponibile su questo dispositivo.'}
+            </Text>
+          </View>
+        </View>
+        <Switch
+          value={isBiometricEnabled}
+          onValueChange={(value) => {
+            Haptics.selectionAsync();
+            onToggleBiometric(value);
+          }}
+          disabled={!isBiometricAvailable}
+          trackColor={{ false: colors.border, true: colors.glowBorder }}
+          thumbColor={colors.text}
+        />
       </View>
     </AppModal>
   );
@@ -111,5 +142,36 @@ const styles = StyleSheet.create({
   scaleLabel: {
     color: colors.textMuted,
     ...typography.caption,
+  },
+  biometricRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.lg,
+    paddingTop: spacing.lg,
+    ...glassBorder,
+    borderLeftWidth: 0,
+    borderRightWidth: 0,
+    borderBottomWidth: 0,
+  },
+  biometricInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    flex: 1,
+    marginRight: spacing.sm,
+  },
+  biometricTextGroup: {
+    flex: 1,
+  },
+  biometricLabel: {
+    color: colors.text,
+    ...typography.body,
+    fontWeight: '600',
+  },
+  biometricHint: {
+    color: colors.textMuted,
+    ...typography.caption,
+    marginTop: 2,
   },
 });

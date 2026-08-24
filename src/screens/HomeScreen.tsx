@@ -27,6 +27,7 @@ import {
   Clock,
   ClipboardPaste,
   Copy,
+  FileDown,
   FileText,
   Languages,
   ListChecks,
@@ -61,6 +62,7 @@ import {
   Density,
   Language,
   LANGUAGE_OPTIONS,
+  LANGUAGE_SPEECH_LOCALES,
   MODE_LABELS,
   ProcessMode,
 } from '../constants/prompts';
@@ -74,14 +76,18 @@ import {
 import { readClipboard, writeClipboard } from '../services/clipboardService';
 import { pickImageFromCamera, pickImageFromLibrary } from '../services/imagePickerService';
 import { pickDocument } from '../services/documentService';
+import { exportResultAsMarkdown, exportResultAsPdf } from '../services/exportService';
+import { authenticateWithBiometrics, isBiometricAvailable } from '../services/biometricService';
 import {
   addCustomPrompt,
   addHistoryEntry,
   CustomPrompt,
   deleteHistoryEntry,
+  getBiometricLockEnabled,
   getCustomPrompts,
   getHistory,
   HistoryEntry,
+  setBiometricLockEnabled,
   toggleFavoriteEntry,
 } from '../services/storageService';
 
@@ -159,11 +165,19 @@ export function HomeScreen() {
   const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>([]);
   const [currentEntryId, setCurrentEntryId] = useState<string | null>(null);
   const [isCurrentFavorite, setIsCurrentFavorite] = useState(false);
+  const [isExporting, setIsExporting] = useState<'pdf' | 'markdown' | null>(null);
+  const [isBiometricEnabled, setIsBiometricEnabled] = useState(false);
+  const [isBiometricHardwareAvailable, setIsBiometricHardwareAvailable] = useState(false);
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamHandleRef = useRef<StreamHandle | null>(null);
 
   useEffect(() => {
     getCustomPrompts().then(setCustomPrompts);
+  }, []);
+
+  useEffect(() => {
+    isBiometricAvailable().then(setIsBiometricHardwareAvailable);
+    getBiometricLockEnabled().then(setIsBiometricEnabled);
   }, []);
 
   useEffect(() => {
@@ -398,8 +412,10 @@ export function HomeScreen() {
       return;
     }
     setIsSpeaking(true);
+    const speechLocale =
+      selectedTone === 'translate' ? LANGUAGE_SPEECH_LOCALES[selectedLanguage] : 'it-IT';
     Speech.speak(outputText, {
-      language: 'it-IT',
+      language: speechLocale,
       onDone: () => setIsSpeaking(false),
       onStopped: () => setIsSpeaking(false),
       onError: () => setIsSpeaking(false),
@@ -452,9 +468,58 @@ export function HomeScreen() {
 
   const handleOpenHistory = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (isBiometricEnabled) {
+      const authenticated = await authenticateWithBiometrics('Sblocca lo storico di Smart Flow');
+      if (!authenticated) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        return;
+      }
+    }
     const entries = await getHistory();
     setHistoryEntries(entries);
     setIsHistoryVisible(true);
+  };
+
+  const handleToggleBiometric = async (enabled: boolean) => {
+    if (enabled) {
+      const authenticated = await authenticateWithBiometrics('Conferma per attivare il blocco dello storico');
+      if (!authenticated) {
+        return;
+      }
+    }
+    setIsBiometricEnabled(enabled);
+    await setBiometricLockEnabled(enabled);
+    showToast(enabled ? 'Blocco biometrico attivato' : 'Blocco biometrico disattivato');
+  };
+
+  const handleExportPdf = async () => {
+    if (!outputText || isExporting) {
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setIsExporting('pdf');
+    try {
+      await exportResultAsPdf(outputText);
+    } catch (error) {
+      setErrorMessage(getFriendlyErrorMessage(error));
+    } finally {
+      setIsExporting(null);
+    }
+  };
+
+  const handleExportMarkdown = async () => {
+    if (!outputText || isExporting) {
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setIsExporting('markdown');
+    try {
+      await exportResultAsMarkdown(outputText);
+    } catch (error) {
+      setErrorMessage(getFriendlyErrorMessage(error));
+    } finally {
+      setIsExporting(null);
+    }
   };
 
   const handleSelectHistoryEntry = async (entry: HistoryEntry) => {
@@ -748,6 +813,39 @@ export function HomeScreen() {
               </Pressable>
             </View>
 
+            <View style={styles.outputActionsRow}>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.secondaryAction,
+                  (!outputText || isExporting || pressed) && styles.secondaryActionDisabled,
+                ]}
+                onPress={handleExportPdf}
+                disabled={!outputText || Boolean(isExporting)}
+              >
+                {isExporting === 'pdf' ? (
+                  <ActivityIndicator color={colors.text} size="small" />
+                ) : (
+                  <FileDown color={colors.text} size={18} />
+                )}
+                <Text style={styles.secondaryActionLabel}>Esporta PDF</Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.secondaryAction,
+                  (!outputText || isExporting || pressed) && styles.secondaryActionDisabled,
+                ]}
+                onPress={handleExportMarkdown}
+                disabled={!outputText || Boolean(isExporting)}
+              >
+                {isExporting === 'markdown' ? (
+                  <ActivityIndicator color={colors.text} size="small" />
+                ) : (
+                  <FileText color={colors.text} size={18} />
+                )}
+                <Text style={styles.secondaryActionLabel}>Esporta MD</Text>
+              </Pressable>
+            </View>
+
             <Pressable
               style={({ pressed }) => [
                 styles.copyButton,
@@ -776,6 +874,9 @@ export function HomeScreen() {
         onClose={() => setIsSettingsVisible(false)}
         temperature={temperature}
         onTemperatureChange={setTemperature}
+        isBiometricEnabled={isBiometricEnabled}
+        isBiometricAvailable={isBiometricHardwareAvailable}
+        onToggleBiometric={handleToggleBiometric}
       />
       <NewPromptModal
         visible={isNewPromptVisible}
