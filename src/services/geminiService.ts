@@ -10,7 +10,23 @@ import {
 } from '../constants/prompts';
 
 export const GEMINI_MODEL = 'gemini-flash-latest';
-const GEMINI_API_BASE = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}`;
+// Used only as an automatic fallback when GEMINI_MODEL is transiently
+// overloaded (503) or rate-limited (429) — confirmed working for this key.
+const FALLBACK_MODEL = 'gemini-3.6-flash';
+const GEMINI_API_ROOT = 'https://generativelanguage.googleapis.com/v1beta/models';
+const RETRY_DELAY_MS = 1200;
+
+function apiUrl(model: string, action: string, apiKey: string): string {
+  return `${GEMINI_API_ROOT}/${model}:${action}?key=${apiKey}`;
+}
+
+function isRetryableStatus(status: number): boolean {
+  return status === 429 || status === 503 || status === 500;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export type ProcessOptions = {
   customPrompt?: string;
@@ -70,6 +86,61 @@ export function getFriendlyErrorMessage(error: unknown): string {
   return 'Si è verificato un errore imprevisto durante l\'elaborazione. Riprova.';
 }
 
+class GeminiHttpError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function fetchGenerateContent(model: string, apiKey: string, body: object): Promise<string> {
+  const response = await fetch(apiUrl(model, 'generateContent', apiKey), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new GeminiHttpError(response.status, `Errore API Gemini (${response.status}): ${errorBody}`);
+  }
+
+  const data = await response.json();
+  const resultText: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+  return resultText.trim();
+}
+
+/**
+ * Calls Gemini with resilience against transient overload: retries the
+ * primary model once after a short delay, then falls back to a secondary
+ * model if the primary is still failing with a retryable (429/500/503)
+ * status. Non-retryable errors (auth, bad request, ...) fail immediately.
+ */
+async function generateContentWithResilience(apiKey: string, body: object): Promise<string> {
+  const attempts: { model: string; delayBeforeMs: number }[] = [
+    { model: GEMINI_MODEL, delayBeforeMs: 0 },
+    { model: GEMINI_MODEL, delayBeforeMs: RETRY_DELAY_MS },
+    { model: FALLBACK_MODEL, delayBeforeMs: 0 },
+  ];
+
+  let lastError: unknown;
+  for (const attempt of attempts) {
+    if (attempt.delayBeforeMs) {
+      await delay(attempt.delayBeforeMs);
+    }
+    try {
+      return await fetchGenerateContent(attempt.model, apiKey, body);
+    } catch (error) {
+      lastError = error;
+      if (!(error instanceof GeminiHttpError) || !isRetryableStatus(error.status)) {
+        throw error;
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
 export async function processText(
   text: string,
   mode: ProcessMode,
@@ -80,24 +151,11 @@ export async function processText(
   const apiKey = getApiKey();
   const systemPrompt = resolveSystemPrompt(mode, density, language, options?.customPrompt);
 
-  const response = await fetch(`${GEMINI_API_BASE}:generateContent?key=${apiKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-      contents: [{ role: 'user', parts: [{ text }] }],
-      generationConfig: buildGenerationConfig(options?.temperature),
-    }),
+  return generateContentWithResilience(apiKey, {
+    systemInstruction: { parts: [{ text: systemPrompt }] },
+    contents: [{ role: 'user', parts: [{ text }] }],
+    generationConfig: buildGenerationConfig(options?.temperature),
   });
-
-  if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(`Errore API Gemini (${response.status}): ${errorBody}`);
-  }
-
-  const data = await response.json();
-  const resultText: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-  return resultText.trim();
 }
 
 export type StreamHandle = { cancel: () => void };
@@ -183,27 +241,14 @@ export function streamProcessText(
 async function extractTextFromInlineData(promptText: string, base64: string, mimeType: string): Promise<string> {
   const apiKey = getApiKey();
 
-  const response = await fetch(`${GEMINI_API_BASE}:generateContent?key=${apiKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: promptText }, { inlineData: { mimeType, data: base64 } }],
-        },
-      ],
-    }),
+  return generateContentWithResilience(apiKey, {
+    contents: [
+      {
+        role: 'user',
+        parts: [{ text: promptText }, { inlineData: { mimeType, data: base64 } }],
+      },
+    ],
   });
-
-  if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(`Errore API Gemini (${response.status}): ${errorBody}`);
-  }
-
-  const data = await response.json();
-  const resultText: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-  return resultText.trim();
 }
 
 export async function extractTextFromImage(base64: string, mimeType: string): Promise<string> {

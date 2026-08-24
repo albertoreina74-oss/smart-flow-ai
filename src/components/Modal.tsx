@@ -27,12 +27,15 @@ export function AppModal({ visible, onClose, children }: AppModalProps) {
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: 'rgba(0, 0, 0, 0.78)',
     justifyContent: 'center',
     padding: spacing.lg,
   },
   sheet: {
-    backgroundColor: colors.surfaceElevated,
+    // Modals sit on top of arbitrary screen content, unlike cards which sit on
+    // our own gradient — they need a near-opaque background or the content
+    // behind bleeds through and becomes unreadable.
+    backgroundColor: 'rgba(20, 24, 28, 0.98)',
     borderRadius: radius.lg,
     padding: spacing.lg,
     ...glassBorder,
