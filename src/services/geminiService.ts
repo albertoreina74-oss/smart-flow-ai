@@ -1,6 +1,8 @@
 import {
+  buildTranslatePrompt,
   Density,
   DENSITY_MODIFIERS,
+  Language,
   ProcessMode,
   SYSTEM_PROMPTS,
   SYSTEM_PROMPT_OCR,
@@ -23,9 +25,13 @@ export async function processText(
   text: string,
   mode: ProcessMode,
   density: Density,
+  language: Language,
 ): Promise<string> {
   const apiKey = getApiKey();
-  const systemPrompt = `${SYSTEM_PROMPTS[mode]} ${DENSITY_MODIFIERS[density]}`;
+  const systemPrompt =
+    mode === 'translate'
+      ? buildTranslatePrompt(language)
+      : `${SYSTEM_PROMPTS[mode]} ${DENSITY_MODIFIERS[density]}`;
 
   const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
     method: 'POST',

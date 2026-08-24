@@ -23,6 +23,7 @@ import {
   Clock,
   ClipboardPaste,
   Copy,
+  Languages,
   ListChecks,
   Share2,
   Sparkles,
@@ -43,7 +44,14 @@ import {
   spacing,
   typography,
 } from '../constants/theme';
-import { DENSITY_LABELS, Density, MODE_LABELS, ProcessMode } from '../constants/prompts';
+import {
+  DENSITY_LABELS,
+  Density,
+  Language,
+  LANGUAGE_OPTIONS,
+  MODE_LABELS,
+  ProcessMode,
+} from '../constants/prompts';
 import { extractTextFromImage, processText } from '../services/geminiService';
 import { readClipboard, writeClipboard } from '../services/clipboardService';
 import { pickImageFromCamera, pickImageFromLibrary } from '../services/imagePickerService';
@@ -53,6 +61,7 @@ const TONE_OPTIONS: { id: ProcessMode; icon: typeof WandSparkles }[] = [
   { id: 'clean', icon: WandSparkles },
   { id: 'formal', icon: Briefcase },
   { id: 'summary', icon: ListChecks },
+  { id: 'translate', icon: Languages },
 ];
 
 const DENSITY_OPTIONS: Density[] = ['essential', 'detailed'];
@@ -98,6 +107,7 @@ export function HomeScreen() {
   const [errorMessage, setErrorMessage] = useState('');
   const [selectedTone, setSelectedTone] = useState<ProcessMode>('clean');
   const [selectedDensity, setSelectedDensity] = useState<Density>('essential');
+  const [selectedLanguage, setSelectedLanguage] = useState<Language>('en');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -175,6 +185,11 @@ export function HomeScreen() {
     setSelectedDensity(density);
   };
 
+  const handleLanguageSelect = (language: Language) => {
+    Haptics.selectionAsync();
+    setSelectedLanguage(language);
+  };
+
   const handleProcess = async () => {
     if (!inputText.trim() || isProcessing) {
       return;
@@ -186,7 +201,7 @@ export function HomeScreen() {
     setIsSpeaking(false);
     try {
       const originalText = inputText.trim();
-      const result = await processText(originalText, selectedTone, selectedDensity);
+      const result = await processText(originalText, selectedTone, selectedDensity, selectedLanguage);
       setOutputText(result);
       await addHistoryEntry({ originalText, generatedText: result, mode: selectedTone });
     } catch (error) {
@@ -348,23 +363,48 @@ export function HomeScreen() {
           </View>
 
           <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Densità</Text>
-            <View style={styles.toneGrid}>
-              {DENSITY_OPTIONS.map((density) => {
-                const isSelected = selectedDensity === density;
-                return (
-                  <Pressable
-                    key={density}
-                    onPress={() => handleDensitySelect(density)}
-                    style={[styles.densityCard, isSelected && styles.toneCardSelected]}
-                  >
-                    <Text style={[styles.toneLabel, isSelected && styles.toneLabelSelected]}>
-                      {DENSITY_LABELS[density]}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            <Text style={styles.sectionLabel}>
+              {selectedTone === 'translate' ? 'Lingua' : 'Densità'}
+            </Text>
+            {selectedTone === 'translate' ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.languageRow}
+              >
+                {LANGUAGE_OPTIONS.map(({ id, label }) => {
+                  const isSelected = selectedLanguage === id;
+                  return (
+                    <Pressable
+                      key={id}
+                      onPress={() => handleLanguageSelect(id)}
+                      style={[styles.languageChip, isSelected && styles.toneCardSelected]}
+                    >
+                      <Text style={[styles.toneLabel, isSelected && styles.toneLabelSelected]}>
+                        {label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            ) : (
+              <View style={styles.toneGrid}>
+                {DENSITY_OPTIONS.map((density) => {
+                  const isSelected = selectedDensity === density;
+                  return (
+                    <Pressable
+                      key={density}
+                      onPress={() => handleDensitySelect(density)}
+                      style={[styles.densityCard, isSelected && styles.toneCardSelected]}
+                    >
+                      <Text style={[styles.toneLabel, isSelected && styles.toneLabelSelected]}>
+                        {DENSITY_LABELS[density]}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
           </View>
 
           <Pressable
@@ -582,6 +622,19 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceAlt,
     borderRadius: radius.lg,
     ...glassBorder,
+    paddingVertical: spacing.md,
+  },
+  languageRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  languageChip: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.pill,
+    ...glassBorder,
+    paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
   },
   toneCardSelected: {
