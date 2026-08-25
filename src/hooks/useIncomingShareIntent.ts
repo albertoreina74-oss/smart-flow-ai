@@ -18,22 +18,39 @@ function isLikelyUrl(value: string): boolean {
 }
 
 /**
- * `Linking.parse()` already URL-decodes query values (it actually decodes
- * twice internally). If an external caller — a Shortcut, another app —
- * double- or triple-encodes its payload, a residual `%XX` sequence can
- * still be left over. Decode once more only in that case, so an
- * already-clean value is never touched (and never double-decoded into
- * something wrong).
+ * Reads one query parameter straight off the raw URL, decoding it exactly
+ * once.
+ *
+ * `Linking.parse()` can't be used for this: it decodes query values *twice*
+ * (expo-linking's `parse` reads `searchParams`, which already decodes, then
+ * calls `decodeURIComponent` on the result again). That silently corrupts any
+ * payload containing a legitimate percent sequence — a shared link with `%20`
+ * in it comes back with a real space, pointing somewhere else entirely. The
+ * Share Extension encodes its payload exactly once, so one decode is right.
  */
-function cleanQueryValue(value: string): string {
-  if (!/%[0-9A-Fa-f]{2}/.test(value)) {
-    return value;
+function readRawQueryParam(url: string, key: string): string | null {
+  const queryStart = url.indexOf('?');
+  if (queryStart === -1) {
+    return null;
   }
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
+  const hashStart = url.indexOf('#', queryStart);
+  const query = url.slice(queryStart + 1, hashStart === -1 ? undefined : hashStart);
+
+  for (const pair of query.split('&')) {
+    const separator = pair.indexOf('=');
+    if (separator === -1 || pair.slice(0, separator) !== key) {
+      continue;
+    }
+    const raw = pair.slice(separator + 1);
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      // Malformed escape sequence — better to hand over the literal value
+      // than to drop the share entirely.
+      return raw;
+    }
   }
+  return null;
 }
 
 /**
@@ -103,19 +120,21 @@ export function useIncomingShareIntent({ onImport }: UseIncomingShareIntentOptio
       if (!url || url === lastHandledUrl.current) {
         return;
       }
+      // Only the route name comes from `Linking.parse` — query values are read
+      // separately, see `readRawQueryParam`.
       const parsed = Linking.parse(url);
       const route = parsed.hostname ?? parsed.path;
       if (route === 'process') {
-        const text = parsed.queryParams?.text;
-        if (typeof text === 'string' && text.trim()) {
+        const text = readRawQueryParam(url, 'text');
+        if (text && text.trim()) {
           lastHandledUrl.current = url;
-          onImport({ kind: 'text', value: cleanQueryValue(text) });
+          onImport({ kind: 'text', value: text });
         }
       } else if (route === 'extract-url') {
-        const targetUrl = parsed.queryParams?.url;
-        if (typeof targetUrl === 'string' && targetUrl.trim()) {
+        const targetUrl = readRawQueryParam(url, 'url');
+        if (targetUrl && targetUrl.trim()) {
           lastHandledUrl.current = url;
-          onImport({ kind: 'url', value: cleanQueryValue(targetUrl) });
+          onImport({ kind: 'url', value: targetUrl });
         }
       }
     };

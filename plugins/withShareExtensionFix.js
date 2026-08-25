@@ -8,62 +8,12 @@ const TARGET_FILE = 'ShareExtension/ShareViewController.swift';
 
 const PATCHES = [
   {
-    // expo-share-intent's generated ShareViewController.swift calls
-    // `application.open(url)` to hand off to the host app and *then* calls
-    // `extensionContext.completeRequest(...)`. On-device this leaves the
-    // calling app (Safari, Chrome, ...) frozen: iOS keeps it suspended
-    // until the extension's request is completed, and completing it only
-    // *after* kicking off the open() hand-off races the app-switch against
-    // the extension process tearing down. Swapping the order — complete
-    // first, open second — releases the calling app immediately.
-    name: 'complete-request-before-open',
-    oldBlock: `    while responder != nil {
-      if let application = responder as? UIApplication {
-        if application.canOpenURL(url) {
-          application.open(url)
-        } else {
-          NSLog("redirectToHostApp canOpenURL KO: \\(shareProtocol)")
-          self.dismissWithError(
-            message: "Application not found, invalid url scheme \\(shareProtocol)")
-          return
-        }
-      }
-      responder = responder!.next
-    }
-    extensionContext!.completeRequest(returningItems: [], completionHandler: nil)
-  }`,
-    newBlock: `    var hostApplication: UIApplication?
-    while responder != nil {
-      if let application = responder as? UIApplication {
-        hostApplication = application
-        break
-      }
-      responder = responder!.next
-    }
-
-    guard let application = hostApplication, application.canOpenURL(url) else {
-      NSLog("redirectToHostApp canOpenURL KO: \\(shareProtocol)")
-      self.dismissWithError(
-        message: "Application not found, invalid url scheme \\(shareProtocol)")
-      return
-    }
-
-    // Release the calling app (Safari/Chrome/...) immediately, *before*
-    // asking iOS to open the host app — see the comment above for why the
-    // order matters.
-    extensionContext!.completeRequest(returningItems: [], completionHandler: nil)
-    application.open(url)
-  }`,
-  },
-  {
     // Some apps (WhatsApp's forward arrow, Notes, Mail) hand a shared
     // message to the extension via `NSExtensionItem.attributedContentText`
     // with an *empty* `attachments` array, instead of an item conforming to
     // `public.text`/`public.plain-text`/`public.utf8-plain-text`. The
     // upstream template only ever looks at `attachments`, so those shares
-    // silently do nothing — the extension just sits there. This adds a
-    // fallback that reads `attributedContentText` when there are no
-    // conforming attachments to inspect.
+    // silently do nothing — the extension just sits there.
     name: 'attributed-content-text-fallback',
     oldBlock: `      else {
         dismissWithError(message: "No content found")
@@ -80,11 +30,10 @@ const PATCHES = [
       {
         // Must hop onto the main actor before doing any of this: the
         // enclosing Task is not main-actor isolated, and redirectToHostApp
-        // walks the responder chain and calls canOpenURL/completeRequest/open
-        // — all UIKit, all main-thread-only. Running it off-thread crashes
-        // the app that presented the share sheet (WhatsApp). Every other
-        // handler in this file hops first for exactly this reason; see
-        // handleText.
+        // walks the responder chain and calls canOpenURL/openURL — all
+        // UIKit, all main-thread-only. Running it off-thread crashes the app
+        // that presented the share sheet. Every other handler in this file
+        // hops first for exactly this reason; see handleText.
         Task { @MainActor in
           self.sharedText.append(plainText)
           let userDefaults = UserDefaults(suiteName: self.hostAppGroupIdentifier)
@@ -96,6 +45,60 @@ const PATCHES = [
       }
 
       for (index, attachment) in (attachments).enumerated() {`,
+  },
+  {
+    // expo-share-intent hands the payload to the app through the App Group
+    // shared container. That transport depends on the
+    // `com.apple.security.application-groups` entitlement actually being
+    // granted at runtime — and when it isn't, `UserDefaults(suiteName:)`
+    // returns nil and every write goes through `?.`, so the payload is
+    // dropped in complete silence: the app still launches, just with nothing
+    // to import. Text and link shares are small enough to travel inside the
+    // redirect URL itself, which needs no entitlement at all.
+    name: 'inline-url-payload',
+    oldBlock: `  private func redirectToHostApp(type: RedirectType) {
+    let nonce = UUID().uuidString
+    let url = URL(string: "\\(shareProtocol)://dataUrl=\\(sharedKey)?nonce=\\(nonce)#\\(type)")!
+    var responder = self as UIResponder?`,
+    newBlock: `  /// Builds a \`smartflow://process?text=…\` / \`smartflow://extract-url?url=…\`
+  /// URL carrying the shared payload directly, so it survives even when the
+  /// App Group container isn't available. Returns nil for share kinds that
+  /// can't travel in a URL (media, files) or payloads too large to try.
+  /// Both routes are already handled app-side by useIncomingShareIntent.
+  private func inlineRedirectUrl(type: RedirectType) -> URL? {
+    let payload: String
+    let route: String
+    switch type {
+    case .text:
+      payload = sharedText.joined(separator: "\\n")
+      route = "process?text="
+    case .weburl:
+      payload = sharedWebUrl.first?.url ?? ""
+      route = "extract-url?url="
+    default:
+      return nil
+    }
+
+    var allowed = CharacterSet.alphanumerics
+    allowed.insert(charactersIn: "-._~")
+
+    guard !payload.isEmpty,
+      let encoded = payload.addingPercentEncoding(withAllowedCharacters: allowed),
+      // Stay well clear of the practical ceiling on a URL handed to openURL;
+      // anything longer falls back to the App Group path below.
+      encoded.count <= 8000
+    else {
+      return nil
+    }
+    return URL(string: "\\(shareProtocol)://\\(route)\\(encoded)")
+  }
+
+  private func redirectToHostApp(type: RedirectType) {
+    let nonce = UUID().uuidString
+    let url =
+      inlineRedirectUrl(type: type)
+      ?? URL(string: "\\(shareProtocol)://dataUrl=\\(sharedKey)?nonce=\\(nonce)#\\(type)")!
+    var responder = self as UIResponder?`,
   },
 ];
 
