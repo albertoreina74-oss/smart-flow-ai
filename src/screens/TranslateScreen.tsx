@@ -42,6 +42,7 @@ import { StreamingCursor } from '../components/StreamingCursor';
 import { pickBestVoiceForLocale } from '../services/speechVoiceService';
 import { runShareAction, shareText } from '../services/shareService';
 import { ExportSheet } from '../components/ExportSheet';
+import { RefineBar } from '../components/RefineBar';
 import { Toast } from '../components/Toast';
 import { colors, glassBorder, gradient, radius, spacing, typography } from '../constants/theme';
 import { screenStyles as s } from '../constants/sharedStyles';
@@ -98,6 +99,10 @@ export function TranslateScreen() {
     isCurrentFavorite,
     runProcessing,
     toggleFavorite,
+    isRefining,
+    canUndoRefine,
+    refineResult,
+    undoRefine,
   } = useGeminiProcessing();
 
   const { cropRequest, requestCrop, confirmCrop, cancelCrop } = useImageCrop();
@@ -502,6 +507,15 @@ export function TranslateScreen() {
               <Copy color={colors.textOnPrimary} size={20} />
               <Text style={s.primaryFilledButtonLabel}>Copia Risultato</Text>
             </Pressable>
+
+            {outputText && !isProcessing ? (
+              <RefineBar
+                onRefine={refineResult}
+                onUndo={undoRefine}
+                canUndo={canUndoRefine}
+                isRefining={isRefining}
+              />
+            ) : null}
           </Card>
           <View style={styles.tabBarSpacer} />
         </ScrollView>

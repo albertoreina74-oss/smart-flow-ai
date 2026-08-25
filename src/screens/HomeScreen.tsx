@@ -51,6 +51,7 @@ import {
 } from 'lucide-react-native';
 import { Card } from '../components/Card';
 import { ExportSheet } from '../components/ExportSheet';
+import { RefineBar } from '../components/RefineBar';
 import { NewPromptModal } from '../components/NewPromptModal';
 import { SettingsModal } from '../components/SettingsModal';
 import { SignatureModal } from '../components/SignatureModal';
@@ -151,6 +152,10 @@ export function HomeScreen({ pendingImport, onPendingImportHandled }: HomeScreen
     isCurrentFavorite,
     runProcessing,
     toggleFavorite,
+    isRefining,
+    canUndoRefine,
+    refineResult,
+    undoRefine,
   } = useGeminiProcessing();
 
   useEffect(() => {
@@ -700,6 +705,15 @@ export function HomeScreen({ pendingImport, onPendingImportHandled }: HomeScreen
               <Copy color={colors.textOnPrimary} size={20} />
               <Text style={s.primaryFilledButtonLabel}>Copia Risultato</Text>
             </Pressable>
+
+            {outputText && !isProcessing ? (
+              <RefineBar
+                onRefine={refineResult}
+                onUndo={undoRefine}
+                canUndo={canUndoRefine}
+                isRefining={isRefining}
+              />
+            ) : null}
           </Card>
           <View style={styles.tabBarSpacer} />
         </ScrollView>

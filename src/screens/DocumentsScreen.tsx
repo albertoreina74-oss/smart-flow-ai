@@ -52,6 +52,7 @@ import {
 } from 'lucide-react-native';
 import { Card } from '../components/Card';
 import { ExportSheet } from '../components/ExportSheet';
+import { RefineBar } from '../components/RefineBar';
 import { SignatureModal } from '../components/SignatureModal';
 import { StreamingCursor } from '../components/StreamingCursor';
 import { Toast } from '../components/Toast';
@@ -145,6 +146,10 @@ export function DocumentsScreen() {
     isCurrentFavorite,
     runProcessing,
     toggleFavorite,
+    isRefining,
+    canUndoRefine,
+    refineResult,
+    undoRefine,
   } = useGeminiProcessing();
 
   const { cropRequest, requestCrop, confirmCrop, cancelCrop } = useImageCrop();
@@ -790,6 +795,15 @@ export function DocumentsScreen() {
               <Copy color={colors.textOnPrimary} size={20} />
               <Text style={s.primaryFilledButtonLabel}>Copia Risultato</Text>
             </Pressable>
+
+            {outputText && !isProcessing ? (
+              <RefineBar
+                onRefine={refineResult}
+                onUndo={undoRefine}
+                canUndo={canUndoRefine}
+                isRefining={isRefining}
+              />
+            ) : null}
           </Card>
           <View style={styles.tabBarSpacer} />
         </ScrollView>

@@ -35,6 +35,22 @@ export async function addHistoryEntry(
   return updated;
 }
 
+/**
+ * Rewrites an existing entry in place, used when a result is refined: a
+ * follow-up pass is a revision of the same piece of work, not a new one, so
+ * it shouldn't push a near-duplicate entry into the archive on every tap.
+ * Keeps the entry's position, id and favorite flag.
+ */
+export async function updateHistoryEntry(
+  id: string,
+  changes: Pick<HistoryEntry, 'generatedText' | 'modeLabel'>,
+): Promise<HistoryEntry[]> {
+  const history = await getHistory();
+  const updated = history.map((entry) => (entry.id === id ? { ...entry, ...changes } : entry));
+  await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
+  return updated;
+}
+
 export async function deleteHistoryEntry(id: string): Promise<HistoryEntry[]> {
   const history = await getHistory();
   const updated = history.filter((entry) => entry.id !== id);
