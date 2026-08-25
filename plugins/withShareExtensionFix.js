@@ -78,11 +78,20 @@ const PATCHES = [
       if attachments.isEmpty, let plainText = content.attributedContentText?.string,
         !plainText.isEmpty
       {
-        self.sharedText.append(plainText)
-        let userDefaults = UserDefaults(suiteName: self.hostAppGroupIdentifier)
-        userDefaults?.set(self.sharedText, forKey: self.sharedKey)
-        userDefaults?.synchronize()
-        self.redirectToHostApp(type: .text)
+        // Must hop onto the main actor before doing any of this: the
+        // enclosing Task is not main-actor isolated, and redirectToHostApp
+        // walks the responder chain and calls canOpenURL/completeRequest/open
+        // — all UIKit, all main-thread-only. Running it off-thread crashes
+        // the app that presented the share sheet (WhatsApp). Every other
+        // handler in this file hops first for exactly this reason; see
+        // handleText.
+        Task { @MainActor in
+          self.sharedText.append(plainText)
+          let userDefaults = UserDefaults(suiteName: self.hostAppGroupIdentifier)
+          userDefaults?.set(self.sharedText, forKey: self.sharedKey)
+          userDefaults?.synchronize()
+          self.redirectToHostApp(type: .text)
+        }
         return
       }
 
