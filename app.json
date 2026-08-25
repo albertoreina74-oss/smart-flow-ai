@@ -65,6 +65,7 @@
           "cameraPermission": "Consenti a Smart Flow AI di accedere alla fotocamera per la scansione nativa dei documenti."
         }
       ],
+      "./plugins/withShareExtensionFix.js",
       [
         "expo-share-intent",
         {

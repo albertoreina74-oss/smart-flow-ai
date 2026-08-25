@@ -5,7 +5,6 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -41,6 +40,7 @@ import { Card } from '../components/Card';
 import { AppModal } from '../components/Modal';
 import { StreamingCursor } from '../components/StreamingCursor';
 import { pickBestVoiceForLocale } from '../services/speechVoiceService';
+import { runShareAction, shareText } from '../services/shareService';
 import { ExportSheet } from '../components/ExportSheet';
 import { Toast } from '../components/Toast';
 import { colors, glassBorder, gradient, radius, spacing, typography } from '../constants/theme';
@@ -66,7 +66,9 @@ import {
   printResult,
 } from '../services/exportService';
 import { pickImageFromCamera, pickImagesFromLibrary } from '../services/imagePickerService';
-import { enhanceScanImage } from '../services/scanEnhanceService';
+import { cropAndEnhanceScanImage } from '../services/scanEnhanceService';
+import { CropModal } from '../components/CropModal';
+import { useImageCrop } from '../hooks/useImageCrop';
 import { useGeminiProcessing } from '../hooks/useGeminiProcessing';
 import { computeMetrics, formatMetrics } from '../utils/textMetrics';
 
@@ -97,6 +99,8 @@ export function TranslateScreen() {
     runProcessing,
     toggleFavorite,
   } = useGeminiProcessing();
+
+  const { cropRequest, requestCrop, confirmCrop, cancelCrop } = useImageCrop();
 
   const showToast = (message: string) => {
     setToastMessage(message);
@@ -145,8 +149,9 @@ export function TranslateScreen() {
 
   // Bypasses the native VisionKit scanner on purpose — see the matching
   // comment in DocumentsScreen.tsx's handleCameraPress for why. The plain
-  // camera capture below only fires on an explicit user tap and has no
-  // extra crop-review screen.
+  // camera capture below only fires on an explicit user tap; the crop step
+  // that follows is our own, so the user still gets to narrow the shot down
+  // to the passage they actually want translated.
   const handleCameraScan = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsCapturingImage('camera');
@@ -156,7 +161,11 @@ export function TranslateScreen() {
       if (!image) {
         return;
       }
-      const enhanced = await enhanceScanImage(image.uri, image.width, image.height);
+      const rect = await requestCrop({ uri: image.uri, width: image.width, height: image.height });
+      if (!rect) {
+        return;
+      }
+      const enhanced = await cropAndEnhanceScanImage(image.uri, image.width, image.height, rect);
       await runOcrAndTranslate(enhanced.base64, enhanced.mimeType);
     } catch (error) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -175,7 +184,12 @@ export function TranslateScreen() {
       if (images.length === 0) {
         return;
       }
-      const enhanced = await enhanceScanImage(images[0].uri, images[0].width, images[0].height);
+      const [image] = images;
+      const rect = await requestCrop({ uri: image.uri, width: image.width, height: image.height });
+      if (!rect) {
+        return;
+      }
+      const enhanced = await cropAndEnhanceScanImage(image.uri, image.width, image.height, rect);
       await runOcrAndTranslate(enhanced.base64, enhanced.mimeType);
     } catch (error) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -224,11 +238,7 @@ export function TranslateScreen() {
       return;
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    try {
-      await Share.share({ message: outputText });
-    } catch {
-      setErrorMessage('Impossibile aprire la condivisione.');
-    }
+    await shareText(outputText);
   };
 
   const handleExportPdf = async () => {
@@ -237,13 +247,8 @@ export function TranslateScreen() {
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsExporting('pdf');
-    try {
-      await exportResultAsPdf(outputText, undefined, pdfQuality);
-    } catch (error) {
-      setErrorMessage(getFriendlyErrorMessage(error));
-    } finally {
-      setIsExporting(null);
-    }
+    await runShareAction(() => exportResultAsPdf(outputText, undefined, pdfQuality));
+    setIsExporting(null);
   };
 
   const handlePrint = async () => {
@@ -252,13 +257,8 @@ export function TranslateScreen() {
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsExporting('print');
-    try {
-      await printResult(outputText, undefined, pdfQuality);
-    } catch (error) {
-      setErrorMessage(getFriendlyErrorMessage(error));
-    } finally {
-      setIsExporting(null);
-    }
+    await runShareAction(() => printResult(outputText, undefined, pdfQuality));
+    setIsExporting(null);
   };
 
   const handleExportMarkdown = async () => {
@@ -267,13 +267,8 @@ export function TranslateScreen() {
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsExporting('markdown');
-    try {
-      await exportResultAsMarkdown(outputText);
-    } catch (error) {
-      setErrorMessage(getFriendlyErrorMessage(error));
-    } finally {
-      setIsExporting(null);
-    }
+    await runShareAction(() => exportResultAsMarkdown(outputText));
+    setIsExporting(null);
   };
 
   const handleExportTxt = async () => {
@@ -282,13 +277,8 @@ export function TranslateScreen() {
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsExporting('txt');
-    try {
-      await exportResultAsTxt(outputText);
-    } catch (error) {
-      setErrorMessage(getFriendlyErrorMessage(error));
-    } finally {
-      setIsExporting(null);
-    }
+    await runShareAction(() => exportResultAsTxt(outputText));
+    setIsExporting(null);
   };
 
   const handleExportDocx = async () => {
@@ -297,13 +287,8 @@ export function TranslateScreen() {
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsExporting('docx');
-    try {
-      await exportResultAsDocx(outputText);
-    } catch (error) {
-      setErrorMessage(getFriendlyErrorMessage(error));
-    } finally {
-      setIsExporting(null);
-    }
+    await runShareAction(() => exportResultAsDocx(outputText));
+    setIsExporting(null);
   };
 
   const canProcess = inputText.trim().length > 0 && !isProcessing;
@@ -604,6 +589,8 @@ export function TranslateScreen() {
           })}
         </View>
       </AppModal>
+
+      <CropModal request={cropRequest} onConfirm={confirmCrop} onCancel={cancelCrop} />
     </LinearGradient>
   );
 }

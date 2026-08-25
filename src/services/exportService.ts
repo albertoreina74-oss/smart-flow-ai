@@ -52,6 +52,13 @@ function buildResultHtml(text: string, signatureDataUri?: string, quality: PdfQu
 }
 
 async function shareFile(uri: string, mimeType: string, uti: string, dialogTitle: string): Promise<void> {
+  // The export functions below all write into the cache directory just
+  // before calling this — confirming the file actually landed on disk
+  // catches a failed/partial write with a clear message instead of letting
+  // `Sharing.shareAsync` fail on a missing file with a cryptic native error.
+  if (!new File(uri).exists) {
+    throw new Error('Il file generato non è stato trovato. Riprova.');
+  }
   const available = await Sharing.isAvailableAsync();
   if (!available) {
     throw new Error('La condivisione non è disponibile su questo dispositivo.');

@@ -7,7 +7,6 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -68,7 +67,9 @@ import {
 import { getSavedSignature } from '../services/storageService';
 import { writeClipboard } from '../services/clipboardService';
 import { pickImageFromCamera, pickImagesFromLibrary } from '../services/imagePickerService';
-import { enhanceScanImage } from '../services/scanEnhanceService';
+import { cropAndEnhanceScanImage, type EnhancedScan } from '../services/scanEnhanceService';
+import { CropModal } from '../components/CropModal';
+import { useImageCrop } from '../hooks/useImageCrop';
 import { pickDocument } from '../services/documentService';
 import {
   exportResultAsCsv,
@@ -81,6 +82,7 @@ import {
   printResult,
 } from '../services/exportService';
 import { ExtractedArticle } from '../services/webExtractorService';
+import { runShareAction, shareText } from '../services/shareService';
 import { pickBestVoiceForLocale } from '../services/speechVoiceService';
 import { useGeminiProcessing } from '../hooks/useGeminiProcessing';
 import { computeMetrics, formatMetrics } from '../utils/textMetrics';
@@ -145,6 +147,8 @@ export function DocumentsScreen() {
     toggleFavorite,
   } = useGeminiProcessing();
 
+  const { cropRequest, requestCrop, confirmCrop, cancelCrop } = useImageCrop();
+
   const showToast = (message: string) => {
     setToastMessage(message);
     setTimeout(() => setToastMessage(''), TOAST_DURATION_MS);
@@ -158,7 +162,11 @@ export function DocumentsScreen() {
       if (!image) {
         return;
       }
-      const enhanced = await enhanceScanImage(image.uri, image.width, image.height);
+      const rect = await requestCrop({ uri: image.uri, width: image.width, height: image.height });
+      if (!rect) {
+        return;
+      }
+      const enhanced = await cropAndEnhanceScanImage(image.uri, image.width, image.height, rect);
       setScanPages((pages) => [
         ...pages,
         { id: nextScanPageId(), uri: enhanced.uri, base64: enhanced.base64, mimeType: enhanced.mimeType },
@@ -180,9 +188,27 @@ export function DocumentsScreen() {
       if (images.length === 0) {
         return;
       }
-      const enhanced = await Promise.all(
-        images.map((image) => enhanceScanImage(image.uri, image.width, image.height)),
-      );
+      // Sequential rather than `Promise.all`: each page gets its own crop
+      // step, and those have to be presented one at a time. Cancelling a
+      // crop skips just that page and moves on to the next.
+      const enhanced: EnhancedScan[] = [];
+      for (let index = 0; index < images.length; index += 1) {
+        const image = images[index];
+        const rect = await requestCrop({
+          uri: image.uri,
+          width: image.width,
+          height: image.height,
+          index,
+          total: images.length,
+        });
+        if (!rect) {
+          continue;
+        }
+        enhanced.push(await cropAndEnhanceScanImage(image.uri, image.width, image.height, rect));
+      }
+      if (enhanced.length === 0) {
+        return;
+      }
       setScanPages((pages) => [
         ...pages,
         ...enhanced.map((image) => ({
@@ -207,7 +233,10 @@ export function DocumentsScreen() {
   // post-shot perspective-crop review screen, and on-device that review
   // screen was positioning its crop handles incorrectly and losing edits.
   // The plain camera capture (allowsEditing: false) is fully manual — the
-  // shutter only fires on an explicit tap, with no extra review screen.
+  // shutter only fires on an explicit tap. Cropping is handled afterwards by
+  // our own `CropModal`, which we control: `allowsEditing: true` is no help
+  // here because on iOS its crop rect is locked to a square (`aspect` is
+  // Android-only) and it's ignored entirely for multi-image selection.
   const handleCameraPress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     Alert.alert('Scansiona documento', 'Scegli la sorgente. Puoi aggiungere più pagine di seguito.', [
@@ -361,11 +390,7 @@ export function DocumentsScreen() {
       return;
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    try {
-      await Share.share({ message: outputText });
-    } catch {
-      setErrorMessage('Impossibile aprire la condivisione.');
-    }
+    await shareText(outputText);
   };
 
   const handleToggleIncludeSignature = () => {
@@ -391,13 +416,8 @@ export function DocumentsScreen() {
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsExporting('pdf');
-    try {
-      await exportResultAsPdf(outputText, resolvedSignature, pdfQuality);
-    } catch (error) {
-      setErrorMessage(getFriendlyErrorMessage(error));
-    } finally {
-      setIsExporting(null);
-    }
+    await runShareAction(() => exportResultAsPdf(outputText, resolvedSignature, pdfQuality));
+    setIsExporting(null);
   };
 
   const handlePrint = async () => {
@@ -406,13 +426,8 @@ export function DocumentsScreen() {
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsExporting('print');
-    try {
-      await printResult(outputText, resolvedSignature, pdfQuality);
-    } catch (error) {
-      setErrorMessage(getFriendlyErrorMessage(error));
-    } finally {
-      setIsExporting(null);
-    }
+    await runShareAction(() => printResult(outputText, resolvedSignature, pdfQuality));
+    setIsExporting(null);
   };
 
   const handleExportMarkdown = async () => {
@@ -421,13 +436,8 @@ export function DocumentsScreen() {
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsExporting('markdown');
-    try {
-      await exportResultAsMarkdown(outputText);
-    } catch (error) {
-      setErrorMessage(getFriendlyErrorMessage(error));
-    } finally {
-      setIsExporting(null);
-    }
+    await runShareAction(() => exportResultAsMarkdown(outputText));
+    setIsExporting(null);
   };
 
   const handleExportTxt = async () => {
@@ -436,13 +446,8 @@ export function DocumentsScreen() {
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsExporting('txt');
-    try {
-      await exportResultAsTxt(outputText);
-    } catch (error) {
-      setErrorMessage(getFriendlyErrorMessage(error));
-    } finally {
-      setIsExporting(null);
-    }
+    await runShareAction(() => exportResultAsTxt(outputText));
+    setIsExporting(null);
   };
 
   const handleExportDocx = async () => {
@@ -451,13 +456,8 @@ export function DocumentsScreen() {
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsExporting('docx');
-    try {
-      await exportResultAsDocx(outputText);
-    } catch (error) {
-      setErrorMessage(getFriendlyErrorMessage(error));
-    } finally {
-      setIsExporting(null);
-    }
+    await runShareAction(() => exportResultAsDocx(outputText));
+    setIsExporting(null);
   };
 
   const handleExportCsv = async () => {
@@ -466,13 +466,8 @@ export function DocumentsScreen() {
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsExporting('csv');
-    try {
-      await exportResultAsCsv(outputText);
-    } catch (error) {
-      setErrorMessage(getFriendlyErrorMessage(error));
-    } finally {
-      setIsExporting(null);
-    }
+    await runShareAction(() => exportResultAsCsv(outputText));
+    setIsExporting(null);
   };
 
   const handleExportXlsx = async () => {
@@ -481,13 +476,8 @@ export function DocumentsScreen() {
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsExporting('xlsx');
-    try {
-      await exportResultAsXlsx(outputText);
-    } catch (error) {
-      setErrorMessage(getFriendlyErrorMessage(error));
-    } finally {
-      setIsExporting(null);
-    }
+    await runShareAction(() => exportResultAsXlsx(outputText));
+    setIsExporting(null);
   };
 
   const canProcess = extractedText.trim().length > 0 && !isProcessing;
@@ -904,6 +894,8 @@ export function DocumentsScreen() {
         onClose={() => setIsWebLinkModalVisible(false)}
         onExtracted={handleWebExtracted}
       />
+
+      <CropModal request={cropRequest} onConfirm={confirmCrop} onCancel={cancelCrop} />
     </LinearGradient>
   );
 }

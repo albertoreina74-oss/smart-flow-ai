@@ -5,7 +5,6 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -85,6 +84,7 @@ import {
 import { ExtractedArticle, extractArticleFromUrl } from '../services/webExtractorService';
 import { IncomingImport } from '../hooks/useIncomingShareIntent';
 import { pickBestVoiceForLocale } from '../services/speechVoiceService';
+import { runShareAction, shareText } from '../services/shareService';
 import { useGeminiProcessing } from '../hooks/useGeminiProcessing';
 import { computeMetrics, formatMetrics } from '../utils/textMetrics';
 
@@ -287,6 +287,12 @@ export function HomeScreen({ pendingImport, onPendingImportHandled }: HomeScreen
   // `smartflow://extract-url?url=...` — extracted with the same Jina
   // Reader pipeline as the "Link Web" button, then summarized.
   const handleImportedUrl = async (url: string) => {
+    // Shows the raw URL immediately (with Sintesi already selected) so the
+    // user sees the share was received right away, before the Jina Reader
+    // round-trip below replaces it with the extracted article.
+    setInputText(url);
+    setSelectedTone('summary');
+    setLastProcessedMode('summary');
     showToast('Link importato, estrazione in corso...');
     try {
       const article = await extractArticleFromUrl(url);
@@ -352,11 +358,7 @@ export function HomeScreen({ pendingImport, onPendingImportHandled }: HomeScreen
       return;
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    try {
-      await Share.share({ message: outputText });
-    } catch {
-      setErrorMessage('Impossibile aprire la condivisione.');
-    }
+    await shareText(outputText);
   };
 
   const handleOpenSettings = () => {
@@ -415,13 +417,8 @@ export function HomeScreen({ pendingImport, onPendingImportHandled }: HomeScreen
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsExporting('pdf');
-    try {
-      await exportResultAsPdf(outputText, resolvedSignature, pdfQuality);
-    } catch (error) {
-      setErrorMessage(getFriendlyErrorMessage(error));
-    } finally {
-      setIsExporting(null);
-    }
+    await runShareAction(() => exportResultAsPdf(outputText, resolvedSignature, pdfQuality));
+    setIsExporting(null);
   };
 
   const handlePrint = async () => {
@@ -430,13 +427,8 @@ export function HomeScreen({ pendingImport, onPendingImportHandled }: HomeScreen
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsExporting('print');
-    try {
-      await printResult(outputText, resolvedSignature, pdfQuality);
-    } catch (error) {
-      setErrorMessage(getFriendlyErrorMessage(error));
-    } finally {
-      setIsExporting(null);
-    }
+    await runShareAction(() => printResult(outputText, resolvedSignature, pdfQuality));
+    setIsExporting(null);
   };
 
   const handleExportMarkdown = async () => {
@@ -445,13 +437,8 @@ export function HomeScreen({ pendingImport, onPendingImportHandled }: HomeScreen
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsExporting('markdown');
-    try {
-      await exportResultAsMarkdown(outputText);
-    } catch (error) {
-      setErrorMessage(getFriendlyErrorMessage(error));
-    } finally {
-      setIsExporting(null);
-    }
+    await runShareAction(() => exportResultAsMarkdown(outputText));
+    setIsExporting(null);
   };
 
   const handleExportTxt = async () => {
@@ -460,13 +447,8 @@ export function HomeScreen({ pendingImport, onPendingImportHandled }: HomeScreen
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsExporting('txt');
-    try {
-      await exportResultAsTxt(outputText);
-    } catch (error) {
-      setErrorMessage(getFriendlyErrorMessage(error));
-    } finally {
-      setIsExporting(null);
-    }
+    await runShareAction(() => exportResultAsTxt(outputText));
+    setIsExporting(null);
   };
 
   const handleExportDocx = async () => {
@@ -475,13 +457,8 @@ export function HomeScreen({ pendingImport, onPendingImportHandled }: HomeScreen
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsExporting('docx');
-    try {
-      await exportResultAsDocx(outputText);
-    } catch (error) {
-      setErrorMessage(getFriendlyErrorMessage(error));
-    } finally {
-      setIsExporting(null);
-    }
+    await runShareAction(() => exportResultAsDocx(outputText));
+    setIsExporting(null);
   };
 
   const handleExportCsv = async () => {
@@ -490,13 +467,8 @@ export function HomeScreen({ pendingImport, onPendingImportHandled }: HomeScreen
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsExporting('csv');
-    try {
-      await exportResultAsCsv(outputText);
-    } catch (error) {
-      setErrorMessage(getFriendlyErrorMessage(error));
-    } finally {
-      setIsExporting(null);
-    }
+    await runShareAction(() => exportResultAsCsv(outputText));
+    setIsExporting(null);
   };
 
   const handleExportXlsx = async () => {
@@ -505,13 +477,8 @@ export function HomeScreen({ pendingImport, onPendingImportHandled }: HomeScreen
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsExporting('xlsx');
-    try {
-      await exportResultAsXlsx(outputText);
-    } catch (error) {
-      setErrorMessage(getFriendlyErrorMessage(error));
-    } finally {
-      setIsExporting(null);
-    }
+    await runShareAction(() => exportResultAsXlsx(outputText));
+    setIsExporting(null);
   };
 
   const canProcess = inputText.trim().length > 0 && !isProcessing;
