@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import * as Linking from 'expo-linking';
 import { useShareIntent } from 'expo-share-intent';
+import { isLikelyUrl, readRawQueryParam } from '../utils/shareLinks';
 
 export type IncomingImport = {
   kind: 'text' | 'url';
@@ -11,47 +12,6 @@ type UseIncomingShareIntentOptions = {
   onImport: (payload: IncomingImport) => void;
 };
 
-const URL_LIKE_PATTERN = /^https?:\/\/\S+$/i;
-
-function isLikelyUrl(value: string): boolean {
-  return URL_LIKE_PATTERN.test(value.trim());
-}
-
-/**
- * Reads one query parameter straight off the raw URL, decoding it exactly
- * once.
- *
- * `Linking.parse()` can't be used for this: it decodes query values *twice*
- * (expo-linking's `parse` reads `searchParams`, which already decodes, then
- * calls `decodeURIComponent` on the result again). That silently corrupts any
- * payload containing a legitimate percent sequence — a shared link with `%20`
- * in it comes back with a real space, pointing somewhere else entirely. The
- * Share Extension encodes its payload exactly once, so one decode is right.
- */
-function readRawQueryParam(url: string, key: string): string | null {
-  const queryStart = url.indexOf('?');
-  if (queryStart === -1) {
-    return null;
-  }
-  const hashStart = url.indexOf('#', queryStart);
-  const query = url.slice(queryStart + 1, hashStart === -1 ? undefined : hashStart);
-
-  for (const pair of query.split('&')) {
-    const separator = pair.indexOf('=');
-    if (separator === -1 || pair.slice(0, separator) !== key) {
-      continue;
-    }
-    const raw = pair.slice(separator + 1);
-    try {
-      return decodeURIComponent(raw);
-    } catch {
-      // Malformed escape sequence — better to hand over the literal value
-      // than to drop the share entirely.
-      return raw;
-    }
-  }
-  return null;
-}
 
 /**
  * `getInitialURL()` can be asked before the OS has finished handing the

@@ -1,0 +1,28 @@
+name: Checks
+
+# Runs on every push so a broken typecheck or a failing test shows up on its
+# own, without having to dispatch an IPA build to find out.
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          # Running the TypeScript test files directly needs Node's built-in
+          # type stripping, unflagged from Node 23.6 on.
+          node-version: 24
+          cache: npm
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Typecheck and run tests
+        run: npm run check

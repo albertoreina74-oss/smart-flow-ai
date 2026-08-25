@@ -4,7 +4,30 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Gates the build: typecheck + unit tests take well under a minute on Linux,
+  # so a mistake surfaces there instead of after an eight-minute macOS archive.
+  # Deliberately a separate job — the build runs on Node 20, while running the
+  # TypeScript test files directly needs a newer Node.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Typecheck and run tests
+        run: npm run check
+
   build:
+    needs: check
     runs-on: macos-26
     steps:
       - name: Checkout
