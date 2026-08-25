@@ -30,17 +30,20 @@ import {
   FileText,
   FileType,
   Layers,
+  Link2,
   ListChecks,
   PenLine,
   Plus,
   Printer,
   Receipt,
   Scan,
+  Share as ShareIcon,
   Share2,
   Sparkles,
   Square,
   SquareCheck,
   Star,
+  Table,
   Trash2,
   TriangleAlert,
   Volume2,
@@ -49,8 +52,11 @@ import {
   X,
 } from 'lucide-react-native';
 import { Card } from '../components/Card';
+import { ExportSheet } from '../components/ExportSheet';
 import { SignatureModal } from '../components/SignatureModal';
+import { StreamingCursor } from '../components/StreamingCursor';
 import { Toast } from '../components/Toast';
+import { WebLinkModal } from '../components/WebLinkModal';
 import { colors, glassBorder, gradient, radius, spacing } from '../constants/theme';
 import { screenStyles as s } from '../constants/sharedStyles';
 import { DENSITY_LABELS, Density, MODE_LABELS, NonTranslateMode } from '../constants/prompts';
@@ -74,9 +80,12 @@ import {
   exportResultAsMarkdown,
   exportResultAsPdf,
   exportResultAsTxt,
+  exportResultAsXlsx,
   PdfQuality,
   printResult,
 } from '../services/exportService';
+import { ExtractedArticle } from '../services/webExtractorService';
+import { pickBestVoiceForLocale } from '../services/speechVoiceService';
 import { useGeminiProcessing } from '../hooks/useGeminiProcessing';
 import { computeMetrics, formatMetrics } from '../utils/textMetrics';
 
@@ -113,15 +122,17 @@ export function DocumentsScreen() {
   const [scanPages, setScanPages] = useState<ScanPage[]>([]);
   const [isExtractingPages, setIsExtractingPages] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [isExporting, setIsExporting] = useState<'pdf' | 'markdown' | 'csv' | 'txt' | 'docx' | 'print' | null>(
-    null,
-  );
+  const [isExporting, setIsExporting] = useState<
+    'pdf' | 'markdown' | 'csv' | 'xlsx' | 'txt' | 'docx' | 'print' | null
+  >(null);
   const [lastProcessedMode, setLastProcessedMode] = useState<NonTranslateMode | null>(null);
   const [pdfQuality, setPdfQuality] = useState<PdfQuality>('high');
   const [toastMessage, setToastMessage] = useState('');
   const [savedSignature, setSavedSignature] = useState<string | null>(null);
   const [includeSignature, setIncludeSignature] = useState(false);
   const [isSignatureModalVisible, setIsSignatureModalVisible] = useState(false);
+  const [isExportSheetVisible, setIsExportSheetVisible] = useState(false);
+  const [isWebLinkModalVisible, setIsWebLinkModalVisible] = useState(false);
 
   useEffect(() => {
     getSavedSignature().then(setSavedSignature);
@@ -333,6 +344,17 @@ export function DocumentsScreen() {
     runProcessing(extractedText, selectedTone, selectedDensity, 'it', MODE_LABELS[selectedTone]);
   };
 
+  const handleWebExtracted = (article: ExtractedArticle) => {
+    const combinedText = article.title ? `${article.title}\n\n${article.content}` : article.content;
+    Speech.stop();
+    setIsSpeaking(false);
+    setExtractedText(combinedText);
+    setSelectedTone('summary');
+    setLastProcessedMode('summary');
+    showToast('Articolo estratto, sintesi in corso...');
+    runProcessing(combinedText, 'summary', selectedDensity, 'it', MODE_LABELS.summary);
+  };
+
   const handleCopyResult = async () => {
     if (!outputText) {
       return;
@@ -343,7 +365,7 @@ export function DocumentsScreen() {
     showToast('Copiato negli appunti');
   };
 
-  const handleToggleSpeech = () => {
+  const handleToggleSpeech = async () => {
     if (!outputText) {
       return;
     }
@@ -354,8 +376,10 @@ export function DocumentsScreen() {
       return;
     }
     setIsSpeaking(true);
+    const voice = await pickBestVoiceForLocale('it-IT');
     Speech.speak(outputText, {
       language: 'it-IT',
+      voice,
       pitch: 1.0,
       rate: 0.95,
       onDone: () => setIsSpeaking(false),
@@ -476,6 +500,21 @@ export function DocumentsScreen() {
     setIsExporting('csv');
     try {
       await exportResultAsCsv(outputText);
+    } catch (error) {
+      setErrorMessage(getFriendlyErrorMessage(error));
+    } finally {
+      setIsExporting(null);
+    }
+  };
+
+  const handleExportXlsx = async () => {
+    if (!outputText || isExporting) {
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setIsExporting('xlsx');
+    try {
+      await exportResultAsXlsx(outputText);
     } catch (error) {
       setErrorMessage(getFriendlyErrorMessage(error));
     } finally {
@@ -639,7 +678,15 @@ export function DocumentsScreen() {
           )}
 
           <Card style={s.section}>
-            <Text style={s.sectionLabel}>Testo estratto</Text>
+            <View style={s.header}>
+              <Text style={s.sectionLabel}>Testo estratto</Text>
+              <Pressable
+                style={({ pressed }) => [s.iconButton, pressed && s.iconButtonPressed]}
+                onPress={() => setIsWebLinkModalVisible(true)}
+              >
+                <Link2 color={colors.glow} size={18} />
+              </Pressable>
+            </View>
             <TextInput
               value={extractedText}
               onChangeText={setExtractedText}
@@ -653,17 +700,17 @@ export function DocumentsScreen() {
 
           <View style={s.section}>
             <Text style={s.sectionLabel}>Modalità</Text>
-            <View style={s.optionGrid}>
+            <View style={s.segmentedControl}>
               {TONE_OPTIONS.map(({ id, icon: Icon }) => {
                 const isSelected = selectedTone === id;
                 return (
                   <Pressable
                     key={id}
                     onPress={() => handleToneSelect(id)}
-                    style={[s.optionCard, isSelected && s.optionSelected]}
+                    style={[s.segmentedOption, isSelected && s.segmentedOptionActive]}
                   >
-                    <Icon color={isSelected ? colors.text : colors.textMuted} size={18} />
-                    <Text style={[s.optionLabel, isSelected && s.optionLabelSelected]}>
+                    <Icon color={isSelected ? colors.text : colors.textMuted} size={14} />
+                    <Text style={[s.segmentedLabel, isSelected && s.segmentedLabelActive]}>
                       {id === 'table' ? 'Tabelle' : MODE_LABELS[id]}
                     </Text>
                   </Pressable>
@@ -674,16 +721,16 @@ export function DocumentsScreen() {
 
           <View style={s.section}>
             <Text style={s.sectionLabel}>Densità</Text>
-            <View style={s.optionGrid}>
+            <View style={s.segmentedControl}>
               {DENSITY_OPTIONS.map((density) => {
                 const isSelected = selectedDensity === density;
                 return (
                   <Pressable
                     key={density}
                     onPress={() => handleDensitySelect(density)}
-                    style={[s.optionCard, isSelected && s.optionSelected]}
+                    style={[s.segmentedOption, isSelected && s.segmentedOptionActive]}
                   >
-                    <Text style={[s.optionLabel, isSelected && s.optionLabelSelected]}>
+                    <Text style={[s.segmentedLabel, isSelected && s.segmentedLabelActive]}>
                       {DENSITY_LABELS[density]}
                     </Text>
                   </Pressable>
@@ -720,9 +767,12 @@ export function DocumentsScreen() {
               ) : isProcessing && !outputText ? (
                 <ActivityIndicator color={colors.glow} />
               ) : (
-                <Text style={outputText ? s.outputText : s.outputPlaceholder}>
-                  {outputText || 'Il testo rielaborato apparirà qui.'}
-                </Text>
+                <View style={s.outputTextRow}>
+                  <Text style={outputText ? s.outputText : s.outputPlaceholder}>
+                    {outputText || 'Il testo rielaborato apparirà qui.'}
+                  </Text>
+                  {isProcessing && outputText ? <StreamingCursor /> : null}
+                </View>
               )}
             </View>
             <Text style={s.metricsText}>{formatMetrics(outputMetrics)}</Text>
@@ -751,16 +801,38 @@ export function DocumentsScreen() {
                 />
                 <Text style={s.secondaryActionLabel}>{isCurrentFavorite ? 'Preferito' : 'Preferisci'}</Text>
               </Pressable>
-              <Pressable
-                style={({ pressed }) => [s.secondaryAction, (!outputText || pressed) && s.secondaryActionDisabled]}
-                onPress={handleShare}
-                disabled={!outputText}
-              >
-                <Share2 color={colors.text} size={18} />
-                <Text style={s.secondaryActionLabel}>Condividi</Text>
-              </Pressable>
             </View>
 
+            <Pressable
+              style={({ pressed }) => [s.shareButton, (!outputText || pressed) && s.secondaryActionDisabled]}
+              onPress={() => setIsExportSheetVisible(true)}
+              disabled={!outputText}
+            >
+              <ShareIcon color={colors.glow} size={19} />
+              <Text style={s.shareButtonLabel}>Esporta / Condividi</Text>
+            </Pressable>
+
+            <Pressable
+              style={({ pressed }) => [
+                s.primaryFilledButton,
+                (!outputText || pressed) && s.primaryFilledButtonPressed,
+              ]}
+              onPress={handleCopyResult}
+              disabled={!outputText}
+            >
+              <Copy color={colors.textOnPrimary} size={20} />
+              <Text style={s.primaryFilledButtonLabel}>Copia Risultato</Text>
+            </Pressable>
+          </Card>
+          <View style={styles.tabBarSpacer} />
+        </ScrollView>
+      </KeyboardAvoidingView>
+      <Toast message={toastMessage} visible={Boolean(toastMessage)} />
+      <ExportSheet
+        visible={isExportSheetVisible}
+        onClose={() => setIsExportSheetVisible(false)}
+        header={
+          <View style={styles.sheetHeader}>
             <View style={s.chipRow}>
               <Pressable
                 style={({ pressed }) => [styles.signatureToggle, pressed && styles.signatureTogglePressed]}
@@ -780,156 +852,80 @@ export function DocumentsScreen() {
                 <PenLine color={colors.text} size={18} />
               </Pressable>
             </View>
-
-            <View style={s.optionGrid}>
+            <View style={s.segmentedControl}>
               <Pressable
-                style={[s.optionCard, pdfQuality === 'high' && s.optionSelected]}
+                style={[s.segmentedOption, pdfQuality === 'high' && s.segmentedOptionActive]}
                 onPress={() => {
                   Haptics.selectionAsync();
                   setPdfQuality('high');
                 }}
               >
-                <Text style={[s.optionLabel, pdfQuality === 'high' && s.optionLabelSelected]}>
+                <Text style={[s.segmentedLabel, pdfQuality === 'high' && s.segmentedLabelActive]}>
                   Qualità Alta
                 </Text>
               </Pressable>
               <Pressable
-                style={[s.optionCard, pdfQuality === 'compact' && s.optionSelected]}
+                style={[s.segmentedOption, pdfQuality === 'compact' && s.segmentedOptionActive]}
                 onPress={() => {
                   Haptics.selectionAsync();
                   setPdfQuality('compact');
                 }}
               >
-                <Text style={[s.optionLabel, pdfQuality === 'compact' && s.optionLabelSelected]}>
+                <Text style={[s.segmentedLabel, pdfQuality === 'compact' && s.segmentedLabelActive]}>
                   Compatto per Email
                 </Text>
               </Pressable>
             </View>
-
-            <View style={s.chipRow}>
-              <Pressable
-                style={({ pressed }) => [
-                  s.secondaryAction,
-                  (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
-                ]}
-                onPress={handleExportPdf}
-                disabled={!outputText || Boolean(isExporting)}
-              >
-                {isExporting === 'pdf' ? (
-                  <ActivityIndicator color={colors.text} size="small" />
-                ) : (
-                  <FileDown color={colors.text} size={18} />
-                )}
-                <Text style={s.secondaryActionLabel}>Esporta PDF</Text>
-              </Pressable>
-              <Pressable
-                style={({ pressed }) => [
-                  s.secondaryAction,
-                  (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
-                ]}
-                onPress={handlePrint}
-                disabled={!outputText || Boolean(isExporting)}
-              >
-                {isExporting === 'print' ? (
-                  <ActivityIndicator color={colors.text} size="small" />
-                ) : (
-                  <Printer color={colors.text} size={18} />
-                )}
-                <Text style={s.secondaryActionLabel}>Stampa</Text>
-              </Pressable>
-            </View>
-
-            <View style={s.chipRow}>
-              <Pressable
-                style={({ pressed }) => [
-                  s.secondaryAction,
-                  (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
-                ]}
-                onPress={handleExportMarkdown}
-                disabled={!outputText || Boolean(isExporting)}
-              >
-                {isExporting === 'markdown' ? (
-                  <ActivityIndicator color={colors.text} size="small" />
-                ) : (
-                  <FileText color={colors.text} size={18} />
-                )}
-                <Text style={s.secondaryActionLabel}>Esporta MD</Text>
-              </Pressable>
-              <Pressable
-                style={({ pressed }) => [
-                  s.secondaryAction,
-                  (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
-                ]}
-                onPress={handleExportTxt}
-                disabled={!outputText || Boolean(isExporting)}
-              >
-                {isExporting === 'txt' ? (
-                  <ActivityIndicator color={colors.text} size="small" />
-                ) : (
-                  <FileIcon color={colors.text} size={18} />
-                )}
-                <Text style={s.secondaryActionLabel}>Esporta TXT</Text>
-              </Pressable>
-            </View>
-
-            <View style={s.chipRow}>
-              <Pressable
-                style={({ pressed }) => [
-                  s.secondaryAction,
-                  (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
-                ]}
-                onPress={handleExportDocx}
-                disabled={!outputText || Boolean(isExporting)}
-              >
-                {isExporting === 'docx' ? (
-                  <ActivityIndicator color={colors.text} size="small" />
-                ) : (
-                  <FileType color={colors.text} size={18} />
-                )}
-                <Text style={s.secondaryActionLabel}>Esporta Word</Text>
-              </Pressable>
-            </View>
-
-            {isTableResult && (
-              <View style={s.chipRow}>
-                <Pressable
-                  style={({ pressed }) => [
-                    s.secondaryAction,
-                    (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
-                  ]}
-                  onPress={handleExportCsv}
-                  disabled={!outputText || Boolean(isExporting)}
-                >
-                  {isExporting === 'csv' ? (
-                    <ActivityIndicator color={colors.text} size="small" />
-                  ) : (
-                    <FileSpreadsheet color={colors.text} size={18} />
-                  )}
-                  <Text style={s.secondaryActionLabel}>Esporta CSV / Excel</Text>
-                </Pressable>
-              </View>
-            )}
-
-            <Pressable
-              style={({ pressed }) => [
-                s.primaryFilledButton,
-                (!outputText || pressed) && s.primaryFilledButtonPressed,
-              ]}
-              onPress={handleCopyResult}
-              disabled={!outputText}
-            >
-              <Copy color={colors.textOnPrimary} size={20} />
-              <Text style={s.primaryFilledButtonLabel}>Copia Risultato</Text>
-            </Pressable>
-          </Card>
-          <View style={styles.tabBarSpacer} />
-        </ScrollView>
-      </KeyboardAvoidingView>
-      <Toast message={toastMessage} visible={Boolean(toastMessage)} />
+          </View>
+        }
+        options={[
+          { key: 'share', label: 'Condividi testo', icon: Share2, onPress: handleShare },
+          { key: 'pdf', label: 'Esporta PDF', icon: FileDown, onPress: handleExportPdf, loading: isExporting === 'pdf' },
+          { key: 'print', label: 'Stampa', icon: Printer, onPress: handlePrint, loading: isExporting === 'print' },
+          {
+            key: 'markdown',
+            label: 'Esporta Markdown',
+            icon: FileText,
+            onPress: handleExportMarkdown,
+            loading: isExporting === 'markdown',
+          },
+          { key: 'txt', label: 'Esporta TXT', icon: FileIcon, onPress: handleExportTxt, loading: isExporting === 'txt' },
+          {
+            key: 'docx',
+            label: 'Esporta Word',
+            icon: FileType,
+            onPress: handleExportDocx,
+            loading: isExporting === 'docx',
+          },
+          ...(isTableResult
+            ? [
+                {
+                  key: 'xlsx',
+                  label: 'Esporta Excel (.xlsx)',
+                  icon: FileSpreadsheet,
+                  onPress: handleExportXlsx,
+                  loading: isExporting === 'xlsx',
+                },
+                {
+                  key: 'csv',
+                  label: 'Esporta CSV',
+                  icon: Table,
+                  onPress: handleExportCsv,
+                  loading: isExporting === 'csv',
+                },
+              ]
+            : []),
+        ]}
+      />
       <SignatureModal
         visible={isSignatureModalVisible}
         onClose={() => setIsSignatureModalVisible(false)}
         onSaved={handleSignatureSaved}
+      />
+      <WebLinkModal
+        visible={isWebLinkModalVisible}
+        onClose={() => setIsWebLinkModalVisible(false)}
+        onExtracted={handleWebExtracted}
       />
     </LinearGradient>
   );
@@ -1066,5 +1062,9 @@ const styles = StyleSheet.create({
   },
   tabBarSpacer: {
     height: 96,
+  },
+  sheetHeader: {
+    gap: spacing.sm,
+    marginBottom: spacing.xs,
   },
 });

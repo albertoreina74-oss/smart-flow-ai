@@ -1,8 +1,9 @@
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { File, Paths } from 'expo-file-system';
-import { markdownTableToCsv } from '../utils/markdownTable';
+import { markdownTableToCsv, markdownTableToRows } from '../utils/markdownTable';
 import { buildDocxBytes } from '../utils/docxBuilder';
+import { buildXlsxBytes } from '../utils/xlsxBuilder';
 
 export type PdfQuality = 'high' | 'compact';
 
@@ -109,4 +110,18 @@ export async function exportResultAsCsv(text: string): Promise<void> {
   file.create();
   file.write(csv);
   await shareFile(file.uri, 'text/csv', 'public.comma-separated-values-text', 'Esporta come CSV');
+}
+
+export async function exportResultAsXlsx(text: string): Promise<void> {
+  const rows = markdownTableToRows(text);
+  const bytes = await buildXlsxBytes(rows);
+  const file = new File(Paths.cache, `smart-flow-${Date.now()}.xlsx`);
+  file.create();
+  file.write(bytes);
+  await shareFile(
+    file.uri,
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'org.openxmlformats.spreadsheetml.sheet',
+    'Esporta come Excel',
+  );
 }

@@ -19,6 +19,7 @@ import * as Speech from 'expo-speech';
 import {
   ArrowRightLeft,
   Camera,
+  Check,
   ClipboardPaste,
   Copy,
   File as FileIcon,
@@ -27,6 +28,7 @@ import {
   FileType,
   Image as ImageIcon,
   Printer,
+  Share as ShareIcon,
   Share2,
   Sparkles,
   Star,
@@ -36,8 +38,12 @@ import {
   VolumeX,
 } from 'lucide-react-native';
 import { Card } from '../components/Card';
+import { AppModal } from '../components/Modal';
+import { StreamingCursor } from '../components/StreamingCursor';
+import { pickBestVoiceForLocale } from '../services/speechVoiceService';
+import { ExportSheet } from '../components/ExportSheet';
 import { Toast } from '../components/Toast';
-import { colors, gradient, spacing } from '../constants/theme';
+import { colors, glassBorder, gradient, radius, spacing, typography } from '../constants/theme';
 import { screenStyles as s } from '../constants/sharedStyles';
 import {
   buildTranslatePrompt,
@@ -82,6 +88,8 @@ export function TranslateScreen() {
   const [pdfQuality, setPdfQuality] = useState<PdfQuality>('high');
   const [toastMessage, setToastMessage] = useState('');
   const [isCapturingImage, setIsCapturingImage] = useState<'camera' | 'gallery' | null>(null);
+  const [isExportSheetVisible, setIsExportSheetVisible] = useState(false);
+  const [activeLanguagePicker, setActiveLanguagePicker] = useState<'source' | 'target' | null>(null);
 
   const {
     outputText,
@@ -196,7 +204,7 @@ export function TranslateScreen() {
     showToast('Copiato negli appunti');
   };
 
-  const handleToggleSpeech = () => {
+  const handleToggleSpeech = async () => {
     if (!outputText) {
       return;
     }
@@ -207,8 +215,11 @@ export function TranslateScreen() {
       return;
     }
     setIsSpeaking(true);
+    const locale = LANGUAGE_SPEECH_LOCALES[targetLanguage];
+    const voice = await pickBestVoiceForLocale(locale);
     Speech.speak(outputText, {
-      language: LANGUAGE_SPEECH_LOCALES[targetLanguage],
+      language: locale,
+      voice,
       pitch: 1.0,
       rate: 0.95,
       onDone: () => setIsSpeaking(false),
@@ -307,6 +318,8 @@ export function TranslateScreen() {
   const canProcess = inputText.trim().length > 0 && !isProcessing;
   const inputMetrics = computeMetrics(inputText);
   const outputMetrics = computeMetrics(outputText);
+  const sourceLabel = SOURCE_LANGUAGE_OPTIONS.find((option) => option.id === sourceLanguage)?.label ?? '';
+  const targetLabel = LANGUAGE_OPTIONS.find((option) => option.id === targetLanguage)?.label ?? '';
 
   return (
     <LinearGradient colors={gradient.background} style={s.screen}>
@@ -323,62 +336,39 @@ export function TranslateScreen() {
             </View>
           </View>
 
-          <View style={s.section}>
-            <Text style={s.sectionLabel}>Da</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chipRow}>
-              {SOURCE_LANGUAGE_OPTIONS.map(({ id, label }) => {
-                const isSelected = sourceLanguage === id;
-                return (
-                  <Pressable
-                    key={id}
-                    onPress={() => {
-                      Haptics.selectionAsync();
-                      setSourceLanguage(id);
-                    }}
-                    style={[s.pill, isSelected && s.optionSelected]}
-                  >
-                    <Text style={[s.optionLabel, isSelected && s.optionLabelSelected]}>{label}</Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          </View>
-
-          <Pressable
-            style={({ pressed }) => [styles.swapButton, pressed && styles.swapButtonPressed]}
-            onPress={handleSwapLanguages}
-            disabled={sourceLanguage === 'auto'}
-          >
-            <ArrowRightLeft
-              color={sourceLanguage === 'auto' ? colors.textMuted : colors.glow}
-              size={18}
-            />
-          </Pressable>
-
-          <View style={s.section}>
-            <Text style={s.sectionLabel}>A</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chipRow}>
-              {LANGUAGE_OPTIONS.map(({ id, label }) => {
-                const isSelected = targetLanguage === id;
-                return (
-                  <Pressable
-                    key={id}
-                    onPress={() => {
-                      Haptics.selectionAsync();
-                      setTargetLanguage(id);
-                    }}
-                    style={[s.pill, isSelected && s.optionSelected]}
-                  >
-                    <Text style={[s.optionLabel, isSelected && s.optionLabelSelected]}>{label}</Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
+          <View style={styles.languageBar}>
+            <Pressable
+              style={({ pressed }) => [styles.languagePill, pressed && styles.languagePillPressed]}
+              onPress={() => setActiveLanguagePicker('source')}
+            >
+              <Text style={styles.languagePillLabel} numberOfLines={1}>
+                {sourceLabel}
+              </Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.swapButton, pressed && styles.swapButtonPressed]}
+              onPress={handleSwapLanguages}
+              disabled={sourceLanguage === 'auto'}
+              hitSlop={8}
+            >
+              <ArrowRightLeft
+                color={sourceLanguage === 'auto' ? colors.textMuted : colors.glow}
+                size={16}
+              />
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.languagePill, pressed && styles.languagePillPressed]}
+              onPress={() => setActiveLanguagePicker('target')}
+            >
+              <Text style={styles.languagePillLabel} numberOfLines={1}>
+                {targetLabel}
+              </Text>
+            </Pressable>
           </View>
 
           <View style={s.section}>
             <Text style={s.sectionLabel}>Registro</Text>
-            <View style={s.optionGrid}>
+            <View style={s.segmentedControl}>
               {REGISTER_OPTIONS.map((option) => {
                 const isSelected = register === option;
                 return (
@@ -388,9 +378,9 @@ export function TranslateScreen() {
                       Haptics.selectionAsync();
                       setRegister(option);
                     }}
-                    style={[s.optionCard, isSelected && s.optionSelected]}
+                    style={[s.segmentedOption, isSelected && s.segmentedOptionActive]}
                   >
-                    <Text style={[s.optionLabel, isSelected && s.optionLabelSelected]}>
+                    <Text style={[s.segmentedLabel, isSelected && s.segmentedLabelActive]}>
                       {REGISTER_LABELS[option]}
                     </Text>
                   </Pressable>
@@ -399,47 +389,34 @@ export function TranslateScreen() {
             </View>
           </View>
 
-          <View style={s.optionGrid}>
-            <Pressable
-              style={({ pressed }) => [
-                s.optionCard,
-                styles.sourceCard,
-                pressed && s.actionChipPressed,
-                isCapturingImage === 'camera' && s.optionSelected,
-              ]}
-              onPress={handleCameraScan}
-              disabled={Boolean(isCapturingImage)}
-            >
-              {isCapturingImage === 'camera' ? (
-                <ActivityIndicator color={colors.text} />
-              ) : (
-                <Camera color={colors.glow} size={26} />
-              )}
-              <Text style={styles.sourceLabel}>📷 Fotocamera</Text>
-              <Text style={styles.sourceHint}>Scansiona</Text>
-            </Pressable>
-            <Pressable
-              style={({ pressed }) => [
-                s.optionCard,
-                styles.sourceCard,
-                pressed && s.actionChipPressed,
-                isCapturingImage === 'gallery' && s.optionSelected,
-              ]}
-              onPress={handleGalleryPick}
-              disabled={Boolean(isCapturingImage)}
-            >
-              {isCapturingImage === 'gallery' ? (
-                <ActivityIndicator color={colors.text} />
-              ) : (
-                <ImageIcon color={colors.glow} size={26} />
-              )}
-              <Text style={styles.sourceLabel}>🖼️ Galleria</Text>
-              <Text style={styles.sourceHint}>Estrai e traduci</Text>
-            </Pressable>
-          </View>
-
           <Card style={s.section}>
-            <Text style={s.sectionLabel}>Testo di partenza</Text>
+            <View style={s.header}>
+              <Text style={s.sectionLabel}>Testo di partenza</Text>
+              <View style={s.headerActions}>
+                <Pressable
+                  style={({ pressed }) => [s.iconButton, pressed && s.iconButtonPressed]}
+                  onPress={handleCameraScan}
+                  disabled={Boolean(isCapturingImage)}
+                >
+                  {isCapturingImage === 'camera' ? (
+                    <ActivityIndicator color={colors.glow} size="small" />
+                  ) : (
+                    <Camera color={colors.glow} size={18} />
+                  )}
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [s.iconButton, pressed && s.iconButtonPressed]}
+                  onPress={handleGalleryPick}
+                  disabled={Boolean(isCapturingImage)}
+                >
+                  {isCapturingImage === 'gallery' ? (
+                    <ActivityIndicator color={colors.glow} size="small" />
+                  ) : (
+                    <ImageIcon color={colors.glow} size={18} />
+                  )}
+                </Pressable>
+              </View>
+            </View>
             <TextInput
               value={inputText}
               onChangeText={setInputText}
@@ -493,9 +470,12 @@ export function TranslateScreen() {
               ) : isProcessing && !outputText ? (
                 <ActivityIndicator color={colors.glow} />
               ) : (
-                <Text style={outputText ? s.outputText : s.outputPlaceholder}>
-                  {outputText || 'La traduzione apparirà qui.'}
-                </Text>
+                <View style={s.outputTextRow}>
+                  <Text style={outputText ? s.outputText : s.outputPlaceholder}>
+                    {outputText || 'La traduzione apparirà qui.'}
+                  </Text>
+                  {isProcessing && outputText ? <StreamingCursor /> : null}
+                </View>
               )}
             </View>
             <Text style={s.metricsText}>{formatMetrics(outputMetrics)}</Text>
@@ -524,124 +504,16 @@ export function TranslateScreen() {
                 />
                 <Text style={s.secondaryActionLabel}>{isCurrentFavorite ? 'Preferito' : 'Preferisci'}</Text>
               </Pressable>
-              <Pressable
-                style={({ pressed }) => [s.secondaryAction, (!outputText || pressed) && s.secondaryActionDisabled]}
-                onPress={handleShare}
-                disabled={!outputText}
-              >
-                <Share2 color={colors.text} size={18} />
-                <Text style={s.secondaryActionLabel}>Condividi</Text>
-              </Pressable>
             </View>
 
-            <View style={s.optionGrid}>
-              <Pressable
-                style={[s.optionCard, pdfQuality === 'high' && s.optionSelected]}
-                onPress={() => {
-                  Haptics.selectionAsync();
-                  setPdfQuality('high');
-                }}
-              >
-                <Text style={[s.optionLabel, pdfQuality === 'high' && s.optionLabelSelected]}>
-                  Qualità Alta
-                </Text>
-              </Pressable>
-              <Pressable
-                style={[s.optionCard, pdfQuality === 'compact' && s.optionSelected]}
-                onPress={() => {
-                  Haptics.selectionAsync();
-                  setPdfQuality('compact');
-                }}
-              >
-                <Text style={[s.optionLabel, pdfQuality === 'compact' && s.optionLabelSelected]}>
-                  Compatto per Email
-                </Text>
-              </Pressable>
-            </View>
-
-            <View style={s.chipRow}>
-              <Pressable
-                style={({ pressed }) => [
-                  s.secondaryAction,
-                  (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
-                ]}
-                onPress={handleExportPdf}
-                disabled={!outputText || Boolean(isExporting)}
-              >
-                {isExporting === 'pdf' ? (
-                  <ActivityIndicator color={colors.text} size="small" />
-                ) : (
-                  <FileDown color={colors.text} size={18} />
-                )}
-                <Text style={s.secondaryActionLabel}>Esporta PDF</Text>
-              </Pressable>
-              <Pressable
-                style={({ pressed }) => [
-                  s.secondaryAction,
-                  (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
-                ]}
-                onPress={handlePrint}
-                disabled={!outputText || Boolean(isExporting)}
-              >
-                {isExporting === 'print' ? (
-                  <ActivityIndicator color={colors.text} size="small" />
-                ) : (
-                  <Printer color={colors.text} size={18} />
-                )}
-                <Text style={s.secondaryActionLabel}>Stampa</Text>
-              </Pressable>
-            </View>
-
-            <View style={s.chipRow}>
-              <Pressable
-                style={({ pressed }) => [
-                  s.secondaryAction,
-                  (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
-                ]}
-                onPress={handleExportMarkdown}
-                disabled={!outputText || Boolean(isExporting)}
-              >
-                {isExporting === 'markdown' ? (
-                  <ActivityIndicator color={colors.text} size="small" />
-                ) : (
-                  <FileText color={colors.text} size={18} />
-                )}
-                <Text style={s.secondaryActionLabel}>Esporta MD</Text>
-              </Pressable>
-              <Pressable
-                style={({ pressed }) => [
-                  s.secondaryAction,
-                  (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
-                ]}
-                onPress={handleExportTxt}
-                disabled={!outputText || Boolean(isExporting)}
-              >
-                {isExporting === 'txt' ? (
-                  <ActivityIndicator color={colors.text} size="small" />
-                ) : (
-                  <FileIcon color={colors.text} size={18} />
-                )}
-                <Text style={s.secondaryActionLabel}>Esporta TXT</Text>
-              </Pressable>
-            </View>
-
-            <View style={s.chipRow}>
-              <Pressable
-                style={({ pressed }) => [
-                  s.secondaryAction,
-                  (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
-                ]}
-                onPress={handleExportDocx}
-                disabled={!outputText || Boolean(isExporting)}
-              >
-                {isExporting === 'docx' ? (
-                  <ActivityIndicator color={colors.text} size="small" />
-                ) : (
-                  <FileType color={colors.text} size={18} />
-                )}
-                <Text style={s.secondaryActionLabel}>Esporta Word</Text>
-              </Pressable>
-            </View>
+            <Pressable
+              style={({ pressed }) => [s.shareButton, (!outputText || pressed) && s.secondaryActionDisabled]}
+              onPress={() => setIsExportSheetVisible(true)}
+              disabled={!outputText}
+            >
+              <ShareIcon color={colors.glow} size={19} />
+              <Text style={s.shareButtonLabel}>Esporta / Condividi</Text>
+            </Pressable>
 
             <Pressable
               style={({ pressed }) => [
@@ -659,38 +531,153 @@ export function TranslateScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
       <Toast message={toastMessage} visible={Boolean(toastMessage)} />
+      <ExportSheet
+        visible={isExportSheetVisible}
+        onClose={() => setIsExportSheetVisible(false)}
+        header={
+          <View style={s.segmentedControl}>
+            <Pressable
+              style={[s.segmentedOption, pdfQuality === 'high' && s.segmentedOptionActive]}
+              onPress={() => {
+                Haptics.selectionAsync();
+                setPdfQuality('high');
+              }}
+            >
+              <Text style={[s.segmentedLabel, pdfQuality === 'high' && s.segmentedLabelActive]}>
+                Qualità Alta
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[s.segmentedOption, pdfQuality === 'compact' && s.segmentedOptionActive]}
+              onPress={() => {
+                Haptics.selectionAsync();
+                setPdfQuality('compact');
+              }}
+            >
+              <Text style={[s.segmentedLabel, pdfQuality === 'compact' && s.segmentedLabelActive]}>
+                Compatto per Email
+              </Text>
+            </Pressable>
+          </View>
+        }
+        options={[
+          { key: 'share', label: 'Condividi testo', icon: Share2, onPress: handleShare },
+          { key: 'pdf', label: 'Esporta PDF', icon: FileDown, onPress: handleExportPdf, loading: isExporting === 'pdf' },
+          { key: 'print', label: 'Stampa', icon: Printer, onPress: handlePrint, loading: isExporting === 'print' },
+          {
+            key: 'markdown',
+            label: 'Esporta Markdown',
+            icon: FileText,
+            onPress: handleExportMarkdown,
+            loading: isExporting === 'markdown',
+          },
+          { key: 'txt', label: 'Esporta TXT', icon: FileIcon, onPress: handleExportTxt, loading: isExporting === 'txt' },
+          {
+            key: 'docx',
+            label: 'Esporta Word',
+            icon: FileType,
+            onPress: handleExportDocx,
+            loading: isExporting === 'docx',
+          },
+        ]}
+      />
+      <AppModal
+        visible={activeLanguagePicker !== null}
+        onClose={() => setActiveLanguagePicker(null)}
+      >
+        <Text style={styles.pickerTitle}>
+          {activeLanguagePicker === 'source' ? 'Traduci da' : 'Traduci verso'}
+        </Text>
+        <View style={styles.pickerList}>
+          {(activeLanguagePicker === 'source' ? SOURCE_LANGUAGE_OPTIONS : LANGUAGE_OPTIONS).map((option) => {
+            const isSelected =
+              activeLanguagePicker === 'source' ? sourceLanguage === option.id : targetLanguage === option.id;
+            return (
+              <Pressable
+                key={option.id}
+                style={({ pressed }) => [styles.pickerRow, pressed && styles.pickerRowPressed]}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  if (activeLanguagePicker === 'source') {
+                    setSourceLanguage(option.id as SourceLanguage);
+                  } else {
+                    setTargetLanguage(option.id as Language);
+                  }
+                  setActiveLanguagePicker(null);
+                }}
+              >
+                <Text style={styles.pickerRowLabel}>{option.label}</Text>
+                {isSelected && <Check color={colors.glow} size={18} />}
+              </Pressable>
+            );
+          })}
+        </View>
+      </AppModal>
     </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  sourceCard: {
-    gap: spacing.xs,
+  languageBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
   },
-  sourceLabel: {
+  languagePill: {
+    flex: 1,
+    alignItems: 'center',
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.pill,
+    ...glassBorder,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+  },
+  languagePillPressed: {
+    backgroundColor: colors.surfaceElevated,
+  },
+  languagePillLabel: {
     color: colors.text,
-    fontWeight: '700',
-    fontSize: 15,
-    marginTop: spacing.xs,
-  },
-  sourceHint: {
-    color: colors.textMuted,
-    fontSize: 12,
+    ...typography.body,
+    fontWeight: '600',
   },
   swapButton: {
-    alignSelf: 'center',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.surfaceAlt,
     borderWidth: 1,
     borderColor: colors.border,
-    marginTop: -spacing.sm,
   },
   swapButtonPressed: {
     backgroundColor: colors.surfaceElevated,
+  },
+  pickerTitle: {
+    color: colors.text,
+    ...typography.title,
+    marginBottom: spacing.md,
+  },
+  pickerList: {
+    gap: spacing.xs,
+  },
+  pickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md,
+    ...glassBorder,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+  },
+  pickerRowPressed: {
+    backgroundColor: colors.surfaceElevated,
+  },
+  pickerRowLabel: {
+    color: colors.text,
+    ...typography.body,
+    fontWeight: '600',
   },
   tabBarSpacer: {
     height: 96,

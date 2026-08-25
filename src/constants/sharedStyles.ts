@@ -223,6 +223,11 @@ export const screenStyles = StyleSheet.create({
     color: colors.text,
     ...typography.body,
   },
+  outputTextRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'flex-end',
+  },
   outputPlaceholder: {
     color: colors.textMuted,
     ...typography.body,
@@ -276,6 +281,53 @@ export const screenStyles = StyleSheet.create({
   },
   primaryFilledButtonLabel: {
     color: colors.textOnPrimary,
+    ...typography.subtitle,
+    fontWeight: '700',
+  },
+  segmentedControl: {
+    flexDirection: 'row',
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.pill,
+    ...glassBorder,
+    padding: 3,
+  },
+  segmentedOption: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 9,
+    borderRadius: radius.pill,
+  },
+  segmentedOptionActive: {
+    backgroundColor: colors.glowMuted,
+    ...glassShadow,
+  },
+  segmentedLabel: {
+    color: colors.textMuted,
+    ...typography.caption,
+    fontWeight: '600',
+  },
+  segmentedLabelActive: {
+    color: colors.text,
+  },
+  shareButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md,
+    ...glassBorder,
+    paddingVertical: spacing.md,
+  },
+  shareButtonPressed: {
+    backgroundColor: colors.surfaceElevated,
+    borderColor: colors.borderStrong,
+  },
+  shareButtonLabel: {
+    color: colors.text,
     ...typography.subtitle,
     fontWeight: '700',
   },

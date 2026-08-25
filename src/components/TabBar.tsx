@@ -31,6 +31,7 @@ export function TabBar({ activeTab, onChange }: TabBarProps) {
             <Pressable
               key={key}
               style={styles.tab}
+              hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
               onPress={() => {
                 if (key !== activeTab) {
                   Haptics.selectionAsync();
@@ -39,7 +40,7 @@ export function TabBar({ activeTab, onChange }: TabBarProps) {
               }}
             >
               <View style={[styles.iconWrapper, isActive && styles.iconWrapperActive]}>
-                <Icon color={isActive ? colors.glow : colors.textMuted} size={20} />
+                <Icon color={isActive ? colors.glow : colors.textMuted} size={21} />
               </View>
               <Text style={[styles.label, isActive && styles.labelActive]}>{label}</Text>
             </Pressable>
@@ -69,18 +70,24 @@ const styles = StyleSheet.create({
   tab: {
     flex: 1,
     alignItems: 'center',
-    gap: 2,
-    paddingVertical: spacing.xs,
+    gap: 3,
+    paddingVertical: spacing.sm,
+    minHeight: 44,
   },
   iconWrapper: {
-    width: 36,
-    height: 28,
+    width: 42,
+    height: 32,
     borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
   iconWrapperActive: {
     backgroundColor: colors.glowMuted,
+    shadowColor: colors.glow,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.7,
+    shadowRadius: 8,
+    elevation: 6,
   },
   label: {
     color: colors.textMuted,
