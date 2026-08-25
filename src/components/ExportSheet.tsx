@@ -1,5 +1,5 @@
-import React from 'react';
-import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useRef } from 'react';
+import { ActivityIndicator, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, glassBorder, radius, spacing, typography } from '../constants/theme';
@@ -24,16 +24,57 @@ type ExportSheetProps = {
 export function ExportSheet({ visible, onClose, title = 'Esporta / Condividi', options, header }: ExportSheetProps) {
   const insets = useSafeAreaInsets();
 
+  // Every option ends in a native presentation — the iOS share sheet
+  // (`UIActivityViewController`) or the print controller. Firing one while
+  // this Modal is still animating out makes UIKit silently refuse to present
+  // it: nothing appears on screen *and* the promise behind it never settles,
+  // so the caller's `finally` never runs and its spinner spins forever.
+  // Holding the action until the sheet has actually gone avoids the conflict.
+  const pendingActionRef = useRef<(() => void) | null>(null);
+  const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const runPendingAction = useCallback(() => {
+    if (fallbackTimerRef.current) {
+      clearTimeout(fallbackTimerRef.current);
+      fallbackTimerRef.current = null;
+    }
+    const action = pendingActionRef.current;
+    pendingActionRef.current = null;
+    action?.();
+  }, []);
+
+  useEffect(() => () => {
+    if (fallbackTimerRef.current) {
+      clearTimeout(fallbackTimerRef.current);
+    }
+  }, []);
+
   const handleSelect = (option: ExportSheetOption) => {
     if (option.loading) {
       return;
     }
+    pendingActionRef.current = option.onPress;
     onClose();
-    option.onPress();
+
+    if (Platform.OS !== 'ios') {
+      // `onDismiss` is iOS-only, and the presentation conflict it guards
+      // against is too — elsewhere, run the action straight away.
+      runPendingAction();
+      return;
+    }
+    // Safety net: should `onDismiss` not arrive for any reason, still run the
+    // action rather than leaving the user with a button that does nothing.
+    fallbackTimerRef.current = setTimeout(runPendingAction, 700);
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent
+      onRequestClose={onClose}
+      onDismiss={runPendingAction}
+    >
       <BlurView intensity={28} tint="dark" style={styles.backdrop}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
         <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
