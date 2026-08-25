@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const HISTORY_KEY = '@smart-flow-ai/history';
 const CUSTOM_PROMPTS_KEY = '@smart-flow-ai/custom-prompts';
 const BIOMETRIC_LOCK_KEY = '@smart-flow-ai/biometric-lock';
+const SIGNATURE_KEY = '@smart-flow-ai/signature';
 const MAX_HISTORY_ENTRIES = 50;
 
 export type HistoryEntry = {
@@ -94,4 +95,18 @@ export async function getBiometricLockEnabled(): Promise<boolean> {
 
 export async function setBiometricLockEnabled(enabled: boolean): Promise<void> {
   await AsyncStorage.setItem(BIOMETRIC_LOCK_KEY, enabled ? 'true' : 'false');
+}
+
+// Stored as a `data:image/png;base64,...` URI so it can be dropped directly
+// into an <img src> for both in-app preview and the expo-print PDF template.
+export async function getSavedSignature(): Promise<string | null> {
+  return AsyncStorage.getItem(SIGNATURE_KEY);
+}
+
+export async function saveSignature(dataUri: string): Promise<void> {
+  await AsyncStorage.setItem(SIGNATURE_KEY, dataUri);
+}
+
+export async function clearSignature(): Promise<void> {
+  await AsyncStorage.removeItem(SIGNATURE_KEY);
 }

@@ -55,6 +55,12 @@ function resolveSystemPrompt(
   if (mode === 'translate') {
     return buildTranslatePrompt(language);
   }
+  // Density ("be concise" / "add detail") doesn't make sense for a
+  // structured table extraction — the shape of the source data decides
+  // that, not a user preference.
+  if (mode === 'table') {
+    return SYSTEM_PROMPTS.table;
+  }
   return `${SYSTEM_PROMPTS[mode]} ${DENSITY_MODIFIERS[density]}`;
 }
 

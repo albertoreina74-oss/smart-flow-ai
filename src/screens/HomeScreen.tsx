@@ -24,14 +24,22 @@ import {
   Briefcase,
   ClipboardPaste,
   Copy,
+  File as FileIcon,
   FileDown,
+  FileSpreadsheet,
   FileText,
+  FileType,
   ListChecks,
   Mic,
   MicOff,
+  PenLine,
   Plus,
+  Printer,
+  Receipt,
   Share2,
   Sparkles,
+  Square,
+  SquareCheck,
   Star,
   Trash2,
   TriangleAlert,
@@ -42,19 +50,29 @@ import {
 import { Card } from '../components/Card';
 import { NewPromptModal } from '../components/NewPromptModal';
 import { SettingsModal } from '../components/SettingsModal';
+import { SignatureModal } from '../components/SignatureModal';
 import { Toast } from '../components/Toast';
-import { colors, gradient, spacing } from '../constants/theme';
+import { colors, glassBorder, gradient, radius, spacing } from '../constants/theme';
 import { screenStyles as s } from '../constants/sharedStyles';
 import { DENSITY_LABELS, Density, MODE_LABELS, ProcessMode } from '../constants/prompts';
 import { getFriendlyErrorMessage } from '../services/geminiService';
 import { readClipboard, writeClipboard } from '../services/clipboardService';
-import { exportResultAsMarkdown, exportResultAsPdf } from '../services/exportService';
+import {
+  exportResultAsCsv,
+  exportResultAsDocx,
+  exportResultAsMarkdown,
+  exportResultAsPdf,
+  exportResultAsTxt,
+  PdfQuality,
+  printResult,
+} from '../services/exportService';
 import { authenticateWithBiometrics, isBiometricAvailable } from '../services/biometricService';
 import {
   addCustomPrompt,
   CustomPrompt,
   getBiometricLockEnabled,
   getCustomPrompts,
+  getSavedSignature,
   setBiometricLockEnabled,
 } from '../services/storageService';
 import { useGeminiProcessing } from '../hooks/useGeminiProcessing';
@@ -64,6 +82,7 @@ const BUILTIN_TONE_OPTIONS: { id: ProcessMode; icon: typeof WandSparkles }[] = [
   { id: 'clean', icon: WandSparkles },
   { id: 'formal', icon: Briefcase },
   { id: 'summary', icon: ListChecks },
+  { id: 'table', icon: Receipt },
 ];
 
 const BUILTIN_MODE_IDS: string[] = BUILTIN_TONE_OPTIONS.map((option) => option.id);
@@ -94,9 +113,16 @@ export function HomeScreen() {
   const [isSettingsVisible, setIsSettingsVisible] = useState(false);
   const [isNewPromptVisible, setIsNewPromptVisible] = useState(false);
   const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>([]);
-  const [isExporting, setIsExporting] = useState<'pdf' | 'markdown' | null>(null);
+  const [isExporting, setIsExporting] = useState<'pdf' | 'markdown' | 'csv' | 'txt' | 'docx' | 'print' | null>(
+    null,
+  );
+  const [lastProcessedMode, setLastProcessedMode] = useState<ProcessMode | null>(null);
+  const [pdfQuality, setPdfQuality] = useState<PdfQuality>('high');
   const [isBiometricEnabled, setIsBiometricEnabled] = useState(false);
   const [isBiometricHardwareAvailable, setIsBiometricHardwareAvailable] = useState(false);
+  const [savedSignature, setSavedSignature] = useState<string | null>(null);
+  const [includeSignature, setIncludeSignature] = useState(false);
+  const [isSignatureModalVisible, setIsSignatureModalVisible] = useState(false);
 
   const {
     outputText,
@@ -116,6 +142,10 @@ export function HomeScreen() {
   useEffect(() => {
     isBiometricAvailable().then(setIsBiometricHardwareAvailable);
     getBiometricLockEnabled().then(setIsBiometricEnabled);
+  }, []);
+
+  useEffect(() => {
+    getSavedSignature().then(setSavedSignature);
   }, []);
 
   useEffect(() => {
@@ -205,16 +235,11 @@ export function HomeScreen() {
       ? customPrompts.find((prompt) => `custom:${prompt.id}` === selectedTone)?.label ??
         'Personalizzata'
       : MODE_LABELS[selectedTone as ProcessMode];
+    const resolvedMode = isCustom ? 'clean' : (selectedTone as ProcessMode);
     Speech.stop();
     setIsSpeaking(false);
-    runProcessing(
-      inputText,
-      isCustom ? 'clean' : (selectedTone as ProcessMode),
-      selectedDensity,
-      'it',
-      modeLabel,
-      { customPrompt, temperature },
-    );
+    setLastProcessedMode(resolvedMode);
+    runProcessing(inputText, resolvedMode, selectedDensity, 'it', modeLabel, { customPrompt, temperature });
   };
 
   const handleCopyResult = async () => {
@@ -293,6 +318,23 @@ export function HomeScreen() {
     showToast(enabled ? 'Blocco biometrico attivato' : 'Blocco biometrico disattivato');
   };
 
+  const handleToggleIncludeSignature = () => {
+    if (!savedSignature) {
+      setIsSignatureModalVisible(true);
+      return;
+    }
+    Haptics.selectionAsync();
+    setIncludeSignature((value) => !value);
+  };
+
+  const handleSignatureSaved = (dataUri: string) => {
+    setSavedSignature(dataUri);
+    setIncludeSignature(true);
+    showToast('Firma salvata');
+  };
+
+  const resolvedSignature = includeSignature && savedSignature ? savedSignature : undefined;
+
   const handleExportPdf = async () => {
     if (!outputText || isExporting) {
       return;
@@ -300,7 +342,22 @@ export function HomeScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsExporting('pdf');
     try {
-      await exportResultAsPdf(outputText);
+      await exportResultAsPdf(outputText, resolvedSignature, pdfQuality);
+    } catch (error) {
+      setErrorMessage(getFriendlyErrorMessage(error));
+    } finally {
+      setIsExporting(null);
+    }
+  };
+
+  const handlePrint = async () => {
+    if (!outputText || isExporting) {
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setIsExporting('print');
+    try {
+      await printResult(outputText, resolvedSignature, pdfQuality);
     } catch (error) {
       setErrorMessage(getFriendlyErrorMessage(error));
     } finally {
@@ -323,7 +380,53 @@ export function HomeScreen() {
     }
   };
 
+  const handleExportTxt = async () => {
+    if (!outputText || isExporting) {
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setIsExporting('txt');
+    try {
+      await exportResultAsTxt(outputText);
+    } catch (error) {
+      setErrorMessage(getFriendlyErrorMessage(error));
+    } finally {
+      setIsExporting(null);
+    }
+  };
+
+  const handleExportDocx = async () => {
+    if (!outputText || isExporting) {
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setIsExporting('docx');
+    try {
+      await exportResultAsDocx(outputText);
+    } catch (error) {
+      setErrorMessage(getFriendlyErrorMessage(error));
+    } finally {
+      setIsExporting(null);
+    }
+  };
+
+  const handleExportCsv = async () => {
+    if (!outputText || isExporting) {
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setIsExporting('csv');
+    try {
+      await exportResultAsCsv(outputText);
+    } catch (error) {
+      setErrorMessage(getFriendlyErrorMessage(error));
+    } finally {
+      setIsExporting(null);
+    }
+  };
+
   const canProcess = inputText.trim().length > 0 && !isProcessing;
+  const isTableResult = lastProcessedMode === 'table';
   const inputMetrics = computeMetrics(inputText);
   const outputMetrics = computeMetrics(outputText);
   const allToneOptions: { id: string; icon: typeof WandSparkles; label?: string }[] = [
@@ -512,6 +615,51 @@ export function HomeScreen() {
 
             <View style={s.chipRow}>
               <Pressable
+                style={({ pressed }) => [styles.signatureToggle, pressed && styles.signatureTogglePressed]}
+                onPress={handleToggleIncludeSignature}
+              >
+                {includeSignature && savedSignature ? (
+                  <SquareCheck color={colors.glow} size={18} />
+                ) : (
+                  <Square color={colors.textMuted} size={18} />
+                )}
+                <Text style={styles.signatureToggleLabel}>Includi firma</Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.signatureManageButton, pressed && styles.signatureTogglePressed]}
+                onPress={() => setIsSignatureModalVisible(true)}
+              >
+                <PenLine color={colors.text} size={18} />
+              </Pressable>
+            </View>
+
+            <View style={s.optionGrid}>
+              <Pressable
+                style={[s.optionCard, pdfQuality === 'high' && s.optionSelected]}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  setPdfQuality('high');
+                }}
+              >
+                <Text style={[s.optionLabel, pdfQuality === 'high' && s.optionLabelSelected]}>
+                  Qualità Alta
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[s.optionCard, pdfQuality === 'compact' && s.optionSelected]}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  setPdfQuality('compact');
+                }}
+              >
+                <Text style={[s.optionLabel, pdfQuality === 'compact' && s.optionLabelSelected]}>
+                  Compatto per Email
+                </Text>
+              </Pressable>
+            </View>
+
+            <View style={s.chipRow}>
+              <Pressable
                 style={({ pressed }) => [
                   s.secondaryAction,
                   (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
@@ -531,6 +679,24 @@ export function HomeScreen() {
                   s.secondaryAction,
                   (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
                 ]}
+                onPress={handlePrint}
+                disabled={!outputText || Boolean(isExporting)}
+              >
+                {isExporting === 'print' ? (
+                  <ActivityIndicator color={colors.text} size="small" />
+                ) : (
+                  <Printer color={colors.text} size={18} />
+                )}
+                <Text style={s.secondaryActionLabel}>Stampa</Text>
+              </Pressable>
+            </View>
+
+            <View style={s.chipRow}>
+              <Pressable
+                style={({ pressed }) => [
+                  s.secondaryAction,
+                  (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
+                ]}
                 onPress={handleExportMarkdown}
                 disabled={!outputText || Boolean(isExporting)}
               >
@@ -541,7 +707,60 @@ export function HomeScreen() {
                 )}
                 <Text style={s.secondaryActionLabel}>Esporta MD</Text>
               </Pressable>
+              <Pressable
+                style={({ pressed }) => [
+                  s.secondaryAction,
+                  (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
+                ]}
+                onPress={handleExportTxt}
+                disabled={!outputText || Boolean(isExporting)}
+              >
+                {isExporting === 'txt' ? (
+                  <ActivityIndicator color={colors.text} size="small" />
+                ) : (
+                  <FileIcon color={colors.text} size={18} />
+                )}
+                <Text style={s.secondaryActionLabel}>Esporta TXT</Text>
+              </Pressable>
             </View>
+
+            <View style={s.chipRow}>
+              <Pressable
+                style={({ pressed }) => [
+                  s.secondaryAction,
+                  (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
+                ]}
+                onPress={handleExportDocx}
+                disabled={!outputText || Boolean(isExporting)}
+              >
+                {isExporting === 'docx' ? (
+                  <ActivityIndicator color={colors.text} size="small" />
+                ) : (
+                  <FileType color={colors.text} size={18} />
+                )}
+                <Text style={s.secondaryActionLabel}>Esporta Word</Text>
+              </Pressable>
+            </View>
+
+            {isTableResult && (
+              <View style={s.chipRow}>
+                <Pressable
+                  style={({ pressed }) => [
+                    s.secondaryAction,
+                    (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
+                  ]}
+                  onPress={handleExportCsv}
+                  disabled={!outputText || Boolean(isExporting)}
+                >
+                  {isExporting === 'csv' ? (
+                    <ActivityIndicator color={colors.text} size="small" />
+                  ) : (
+                    <FileSpreadsheet color={colors.text} size={18} />
+                  )}
+                  <Text style={s.secondaryActionLabel}>Esporta CSV / Excel</Text>
+                </Pressable>
+              </View>
+            )}
 
             <Pressable
               style={({ pressed }) => [
@@ -559,6 +778,11 @@ export function HomeScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
       <Toast message={toastMessage} visible={Boolean(toastMessage)} />
+      <SignatureModal
+        visible={isSignatureModalVisible}
+        onClose={() => setIsSignatureModalVisible(false)}
+        onSaved={handleSignatureSaved}
+      />
       <SettingsModal
         visible={isSettingsVisible}
         onClose={() => setIsSettingsVisible(false)}
@@ -578,6 +802,33 @@ export function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  signatureToggle: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md,
+    ...glassBorder,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+  },
+  signatureManageButton: {
+    width: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md,
+    ...glassBorder,
+  },
+  signatureTogglePressed: {
+    backgroundColor: colors.surfaceElevated,
+  },
+  signatureToggleLabel: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '600',
+  },
   tabBarSpacer: {
     height: 96,
   },

@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -20,21 +21,37 @@ import * as Speech from 'expo-speech';
 import {
   Briefcase,
   Camera,
+  ChevronLeft,
+  ChevronRight,
   Copy,
+  File as FileIcon,
   FileDown,
+  FileSpreadsheet,
   FileText,
+  FileType,
+  Layers,
   ListChecks,
+  PenLine,
+  Plus,
+  Printer,
+  Receipt,
+  Scan,
   Share2,
   Sparkles,
+  Square,
+  SquareCheck,
   Star,
+  Trash2,
   TriangleAlert,
   Volume2,
   VolumeX,
   WandSparkles,
+  X,
 } from 'lucide-react-native';
 import { Card } from '../components/Card';
+import { SignatureModal } from '../components/SignatureModal';
 import { Toast } from '../components/Toast';
-import { colors, gradient, spacing } from '../constants/theme';
+import { colors, glassBorder, gradient, radius, spacing } from '../constants/theme';
 import { screenStyles as s } from '../constants/sharedStyles';
 import { DENSITY_LABELS, Density, MODE_LABELS, NonTranslateMode } from '../constants/prompts';
 import {
@@ -42,17 +59,45 @@ import {
   extractTextFromImage,
   getFriendlyErrorMessage,
 } from '../services/geminiService';
+import { getSavedSignature } from '../services/storageService';
 import { writeClipboard } from '../services/clipboardService';
-import { pickImageFromCamera, pickImageFromLibrary } from '../services/imagePickerService';
+import { pickImageFromCamera, pickImagesFromLibrary } from '../services/imagePickerService';
+import { enhanceScanImage, normalizeNativeScan } from '../services/scanEnhanceService';
+import {
+  isNativeDocumentScannerAvailable,
+  scanDocumentPagesNative,
+} from '../services/nativeDocumentScannerService';
 import { pickDocument } from '../services/documentService';
-import { exportResultAsMarkdown, exportResultAsPdf } from '../services/exportService';
+import {
+  exportResultAsCsv,
+  exportResultAsDocx,
+  exportResultAsMarkdown,
+  exportResultAsPdf,
+  exportResultAsTxt,
+  PdfQuality,
+  printResult,
+} from '../services/exportService';
 import { useGeminiProcessing } from '../hooks/useGeminiProcessing';
 import { computeMetrics, formatMetrics } from '../utils/textMetrics';
+
+type ScanPage = {
+  id: string;
+  uri: string;
+  base64: string;
+  mimeType: string;
+};
+
+let scanPageCounter = 0;
+function nextScanPageId(): string {
+  scanPageCounter += 1;
+  return `scan-${Date.now()}-${scanPageCounter}`;
+}
 
 const TONE_OPTIONS: { id: NonTranslateMode; icon: typeof WandSparkles }[] = [
   { id: 'clean', icon: WandSparkles },
   { id: 'formal', icon: Briefcase },
   { id: 'summary', icon: ListChecks },
+  { id: 'table', icon: Receipt },
 ];
 
 const DENSITY_OPTIONS: Density[] = ['essential', 'detailed'];
@@ -65,9 +110,22 @@ export function DocumentsScreen() {
   const [selectedDensity, setSelectedDensity] = useState<Density>('essential');
   const [isScanning, setIsScanning] = useState(false);
   const [isDocumentLoading, setIsDocumentLoading] = useState(false);
+  const [scanPages, setScanPages] = useState<ScanPage[]>([]);
+  const [isExtractingPages, setIsExtractingPages] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [isExporting, setIsExporting] = useState<'pdf' | 'markdown' | null>(null);
+  const [isExporting, setIsExporting] = useState<'pdf' | 'markdown' | 'csv' | 'txt' | 'docx' | 'print' | null>(
+    null,
+  );
+  const [lastProcessedMode, setLastProcessedMode] = useState<NonTranslateMode | null>(null);
+  const [pdfQuality, setPdfQuality] = useState<PdfQuality>('high');
   const [toastMessage, setToastMessage] = useState('');
+  const [savedSignature, setSavedSignature] = useState<string | null>(null);
+  const [includeSignature, setIncludeSignature] = useState(false);
+  const [isSignatureModalVisible, setIsSignatureModalVisible] = useState(false);
+
+  useEffect(() => {
+    getSavedSignature().then(setSavedSignature);
+  }, []);
 
   const {
     outputText,
@@ -85,16 +143,75 @@ export function DocumentsScreen() {
     setTimeout(() => setToastMessage(''), TOAST_DURATION_MS);
   };
 
-  const runImageScan = async (source: 'camera' | 'library') => {
+  const addScanPageFromCamera = async () => {
     setIsScanning(true);
     setErrorMessage('');
     try {
-      const image = source === 'camera' ? await pickImageFromCamera() : await pickImageFromLibrary();
+      const image = await pickImageFromCamera();
       if (!image) {
         return;
       }
-      const text = await extractTextFromImage(image.base64, image.mimeType);
-      setExtractedText(text);
+      const enhanced = await enhanceScanImage(image.uri, image.width, image.height);
+      setScanPages((pages) => [
+        ...pages,
+        { id: nextScanPageId(), uri: enhanced.uri, base64: enhanced.base64, mimeType: enhanced.mimeType },
+      ]);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setErrorMessage(getFriendlyErrorMessage(error));
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  const addScanPagesFromNativeScanner = async () => {
+    setIsScanning(true);
+    setErrorMessage('');
+    try {
+      const outcome = await scanDocumentPagesNative();
+      if (!outcome || outcome.cancelled || outcome.imageUris.length === 0) {
+        return;
+      }
+      const enhanced = await Promise.all(outcome.imageUris.map((uri) => normalizeNativeScan(uri)));
+      setScanPages((pages) => [
+        ...pages,
+        ...enhanced.map((image) => ({
+          id: nextScanPageId(),
+          uri: image.uri,
+          base64: image.base64,
+          mimeType: image.mimeType,
+        })),
+      ]);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setErrorMessage(getFriendlyErrorMessage(error));
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  const addScanPagesFromLibrary = async () => {
+    setIsScanning(true);
+    setErrorMessage('');
+    try {
+      const images = await pickImagesFromLibrary();
+      if (images.length === 0) {
+        return;
+      }
+      const enhanced = await Promise.all(
+        images.map((image) => enhanceScanImage(image.uri, image.width, image.height)),
+      );
+      setScanPages((pages) => [
+        ...pages,
+        ...enhanced.map((image) => ({
+          id: nextScanPageId(),
+          uri: image.uri,
+          base64: image.base64,
+          mimeType: image.mimeType,
+        })),
+      ]);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -106,11 +223,76 @@ export function DocumentsScreen() {
 
   const handleCameraPress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Alert.alert('Scansiona testo', "Scegli la sorgente dell'immagine", [
-      { text: 'Scatta foto', onPress: () => runImageScan('camera') },
-      { text: 'Scegli dalla libreria', onPress: () => runImageScan('library') },
+    if (isNativeDocumentScannerAvailable()) {
+      Alert.alert('Scansiona documento', 'Rilevamento automatico dei contorni con correzione prospettica.', [
+        { text: 'Scansione fotocamera', onPress: addScanPagesFromNativeScanner },
+        { text: 'Scegli dalla libreria', onPress: addScanPagesFromLibrary },
+        { text: 'Annulla', style: 'cancel' },
+      ]);
+      return;
+    }
+    Alert.alert('Scansiona documento', 'Scegli la sorgente. Puoi aggiungere più pagine di seguito.', [
+      { text: 'Scatta foto', onPress: addScanPageFromCamera },
+      { text: 'Scegli dalla libreria', onPress: addScanPagesFromLibrary },
       { text: 'Annulla', style: 'cancel' },
     ]);
+  };
+
+  const handleRemoveScanPage = (id: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setScanPages((pages) => pages.filter((page) => page.id !== id));
+  };
+
+  const handleMoveScanPage = (index: number, direction: -1 | 1) => {
+    const targetIndex = index + direction;
+    setScanPages((pages) => {
+      if (targetIndex < 0 || targetIndex >= pages.length) {
+        return pages;
+      }
+      Haptics.selectionAsync();
+      const next = [...pages];
+      [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+      return next;
+    });
+  };
+
+  const handleClearScanPages = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setScanPages([]);
+  };
+
+  const handleExtractScanPages = async () => {
+    if (scanPages.length === 0 || isExtractingPages) {
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setIsExtractingPages(true);
+    setErrorMessage('');
+    const sections: string[] = [];
+    let failures = 0;
+    for (let i = 0; i < scanPages.length; i += 1) {
+      const page = scanPages[i];
+      try {
+        const text = await extractTextFromImage(page.base64, page.mimeType);
+        sections.push(scanPages.length > 1 ? `## Pagina ${i + 1}\n\n${text}` : text);
+      } catch (error) {
+        failures += 1;
+        sections.push(`## Pagina ${i + 1}\n\n[Errore estrazione: ${getFriendlyErrorMessage(error)}]`);
+      }
+    }
+    setExtractedText(sections.join('\n\n'));
+    setScanPages([]);
+    setIsExtractingPages(false);
+    if (failures === scanPages.length) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } else {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      showToast(
+        failures > 0
+          ? `Testo unificato, ${failures} ${failures > 1 ? 'pagine non riuscite' : 'pagina non riuscita'}`
+          : `Testo unificato da ${scanPages.length} pagine`,
+      );
+    }
   };
 
   const handleDocumentPress = async () => {
@@ -147,6 +329,7 @@ export function DocumentsScreen() {
   const handleProcess = () => {
     Speech.stop();
     setIsSpeaking(false);
+    setLastProcessedMode(selectedTone);
     runProcessing(extractedText, selectedTone, selectedDensity, 'it', MODE_LABELS[selectedTone]);
   };
 
@@ -193,6 +376,23 @@ export function DocumentsScreen() {
     }
   };
 
+  const handleToggleIncludeSignature = () => {
+    if (!savedSignature) {
+      setIsSignatureModalVisible(true);
+      return;
+    }
+    Haptics.selectionAsync();
+    setIncludeSignature((value) => !value);
+  };
+
+  const handleSignatureSaved = (dataUri: string) => {
+    setSavedSignature(dataUri);
+    setIncludeSignature(true);
+    showToast('Firma salvata');
+  };
+
+  const resolvedSignature = includeSignature && savedSignature ? savedSignature : undefined;
+
   const handleExportPdf = async () => {
     if (!outputText || isExporting) {
       return;
@@ -200,7 +400,22 @@ export function DocumentsScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsExporting('pdf');
     try {
-      await exportResultAsPdf(outputText);
+      await exportResultAsPdf(outputText, resolvedSignature, pdfQuality);
+    } catch (error) {
+      setErrorMessage(getFriendlyErrorMessage(error));
+    } finally {
+      setIsExporting(null);
+    }
+  };
+
+  const handlePrint = async () => {
+    if (!outputText || isExporting) {
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setIsExporting('print');
+    try {
+      await printResult(outputText, resolvedSignature, pdfQuality);
     } catch (error) {
       setErrorMessage(getFriendlyErrorMessage(error));
     } finally {
@@ -223,7 +438,54 @@ export function DocumentsScreen() {
     }
   };
 
+  const handleExportTxt = async () => {
+    if (!outputText || isExporting) {
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setIsExporting('txt');
+    try {
+      await exportResultAsTxt(outputText);
+    } catch (error) {
+      setErrorMessage(getFriendlyErrorMessage(error));
+    } finally {
+      setIsExporting(null);
+    }
+  };
+
+  const handleExportDocx = async () => {
+    if (!outputText || isExporting) {
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setIsExporting('docx');
+    try {
+      await exportResultAsDocx(outputText);
+    } catch (error) {
+      setErrorMessage(getFriendlyErrorMessage(error));
+    } finally {
+      setIsExporting(null);
+    }
+  };
+
+  const handleExportCsv = async () => {
+    if (!outputText || isExporting) {
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setIsExporting('csv');
+    try {
+      await exportResultAsCsv(outputText);
+    } catch (error) {
+      setErrorMessage(getFriendlyErrorMessage(error));
+    } finally {
+      setIsExporting(null);
+    }
+  };
+
+  const nativeScannerAvailable = isNativeDocumentScannerAvailable();
   const canProcess = extractedText.trim().length > 0 && !isProcessing;
+  const isTableResult = lastProcessedMode === 'table';
   const metrics = computeMetrics(extractedText);
   const outputMetrics = computeMetrics(outputText);
 
@@ -277,9 +539,104 @@ export function DocumentsScreen() {
                 <Camera color={colors.glow} size={26} />
               )}
               <Text style={styles.sourceLabel}>Fotocamera</Text>
-              <Text style={styles.sourceHint}>Scansione OCR</Text>
+              <Text style={styles.sourceHint}>
+                {nativeScannerAvailable ? 'Rilevamento automatico' : 'Scansione OCR'}
+              </Text>
             </Pressable>
           </View>
+
+          {scanPages.length > 0 && (
+            <Card style={s.section}>
+              <View style={styles.scanHeaderRow}>
+                <View style={styles.scanHeaderTitle}>
+                  <Layers color={colors.glow} size={16} />
+                  <Text style={s.sectionLabel}>
+                    Scansione · {scanPages.length} {scanPages.length > 1 ? 'pagine' : 'pagina'}
+                  </Text>
+                </View>
+                <Pressable hitSlop={8} onPress={handleClearScanPages} disabled={isExtractingPages}>
+                  <Text style={styles.scanClearLabel}>Annulla</Text>
+                </Pressable>
+              </View>
+
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pageRow}>
+                {scanPages.map((page, index) => (
+                  <View key={page.id} style={styles.pageThumbWrapper}>
+                    <Image source={{ uri: page.uri }} style={styles.pageThumb} />
+                    <View style={styles.pageBadge}>
+                      <Text style={styles.pageBadgeLabel}>{index + 1}</Text>
+                    </View>
+                    <Pressable
+                      style={styles.pageDeleteButton}
+                      onPress={() => handleRemoveScanPage(page.id)}
+                      disabled={isExtractingPages}
+                      hitSlop={6}
+                    >
+                      <X color={colors.textOnPrimary} size={12} />
+                    </Pressable>
+                    <View style={styles.pageReorderRow}>
+                      <Pressable
+                        style={[styles.pageReorderButton, index === 0 && styles.pageReorderButtonDisabled]}
+                        onPress={() => handleMoveScanPage(index, -1)}
+                        disabled={index === 0 || isExtractingPages}
+                        hitSlop={6}
+                      >
+                        <ChevronLeft
+                          color={index === 0 ? colors.textMuted : colors.text}
+                          size={14}
+                        />
+                      </Pressable>
+                      <Pressable
+                        style={[
+                          styles.pageReorderButton,
+                          index === scanPages.length - 1 && styles.pageReorderButtonDisabled,
+                        ]}
+                        onPress={() => handleMoveScanPage(index, 1)}
+                        disabled={index === scanPages.length - 1 || isExtractingPages}
+                        hitSlop={6}
+                      >
+                        <ChevronRight
+                          color={index === scanPages.length - 1 ? colors.textMuted : colors.text}
+                          size={14}
+                        />
+                      </Pressable>
+                    </View>
+                  </View>
+                ))}
+                <Pressable
+                  style={({ pressed }) => [styles.addPageButton, pressed && styles.addPageButtonPressed]}
+                  onPress={handleCameraPress}
+                  disabled={isScanning || isExtractingPages}
+                >
+                  {isScanning ? (
+                    <ActivityIndicator color={colors.text} />
+                  ) : (
+                    <Plus color={colors.text} size={22} />
+                  )}
+                </Pressable>
+              </ScrollView>
+
+              <Pressable
+                style={({ pressed }) => [
+                  s.primaryFilledButton,
+                  (isExtractingPages || pressed) && s.primaryFilledButtonPressed,
+                ]}
+                onPress={handleExtractScanPages}
+                disabled={isExtractingPages}
+              >
+                {isExtractingPages ? (
+                  <ActivityIndicator color={colors.textOnPrimary} />
+                ) : (
+                  <Scan color={colors.textOnPrimary} size={18} />
+                )}
+                <Text style={s.primaryFilledButtonLabel}>
+                  {isExtractingPages
+                    ? 'Estrazione testo...'
+                    : `Estrai testo da ${scanPages.length} ${scanPages.length > 1 ? 'pagine' : 'pagina'}`}
+                </Text>
+              </Pressable>
+            </Card>
+          )}
 
           <Card style={s.section}>
             <Text style={s.sectionLabel}>Testo estratto</Text>
@@ -307,7 +664,7 @@ export function DocumentsScreen() {
                   >
                     <Icon color={isSelected ? colors.text : colors.textMuted} size={18} />
                     <Text style={[s.optionLabel, isSelected && s.optionLabelSelected]}>
-                      {MODE_LABELS[id]}
+                      {id === 'table' ? 'Tabelle' : MODE_LABELS[id]}
                     </Text>
                   </Pressable>
                 );
@@ -406,6 +763,51 @@ export function DocumentsScreen() {
 
             <View style={s.chipRow}>
               <Pressable
+                style={({ pressed }) => [styles.signatureToggle, pressed && styles.signatureTogglePressed]}
+                onPress={handleToggleIncludeSignature}
+              >
+                {includeSignature && savedSignature ? (
+                  <SquareCheck color={colors.glow} size={18} />
+                ) : (
+                  <Square color={colors.textMuted} size={18} />
+                )}
+                <Text style={styles.signatureToggleLabel}>Includi firma</Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.signatureManageButton, pressed && styles.signatureTogglePressed]}
+                onPress={() => setIsSignatureModalVisible(true)}
+              >
+                <PenLine color={colors.text} size={18} />
+              </Pressable>
+            </View>
+
+            <View style={s.optionGrid}>
+              <Pressable
+                style={[s.optionCard, pdfQuality === 'high' && s.optionSelected]}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  setPdfQuality('high');
+                }}
+              >
+                <Text style={[s.optionLabel, pdfQuality === 'high' && s.optionLabelSelected]}>
+                  Qualità Alta
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[s.optionCard, pdfQuality === 'compact' && s.optionSelected]}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  setPdfQuality('compact');
+                }}
+              >
+                <Text style={[s.optionLabel, pdfQuality === 'compact' && s.optionLabelSelected]}>
+                  Compatto per Email
+                </Text>
+              </Pressable>
+            </View>
+
+            <View style={s.chipRow}>
+              <Pressable
                 style={({ pressed }) => [
                   s.secondaryAction,
                   (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
@@ -425,6 +827,24 @@ export function DocumentsScreen() {
                   s.secondaryAction,
                   (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
                 ]}
+                onPress={handlePrint}
+                disabled={!outputText || Boolean(isExporting)}
+              >
+                {isExporting === 'print' ? (
+                  <ActivityIndicator color={colors.text} size="small" />
+                ) : (
+                  <Printer color={colors.text} size={18} />
+                )}
+                <Text style={s.secondaryActionLabel}>Stampa</Text>
+              </Pressable>
+            </View>
+
+            <View style={s.chipRow}>
+              <Pressable
+                style={({ pressed }) => [
+                  s.secondaryAction,
+                  (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
+                ]}
                 onPress={handleExportMarkdown}
                 disabled={!outputText || Boolean(isExporting)}
               >
@@ -435,7 +855,60 @@ export function DocumentsScreen() {
                 )}
                 <Text style={s.secondaryActionLabel}>Esporta MD</Text>
               </Pressable>
+              <Pressable
+                style={({ pressed }) => [
+                  s.secondaryAction,
+                  (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
+                ]}
+                onPress={handleExportTxt}
+                disabled={!outputText || Boolean(isExporting)}
+              >
+                {isExporting === 'txt' ? (
+                  <ActivityIndicator color={colors.text} size="small" />
+                ) : (
+                  <FileIcon color={colors.text} size={18} />
+                )}
+                <Text style={s.secondaryActionLabel}>Esporta TXT</Text>
+              </Pressable>
             </View>
+
+            <View style={s.chipRow}>
+              <Pressable
+                style={({ pressed }) => [
+                  s.secondaryAction,
+                  (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
+                ]}
+                onPress={handleExportDocx}
+                disabled={!outputText || Boolean(isExporting)}
+              >
+                {isExporting === 'docx' ? (
+                  <ActivityIndicator color={colors.text} size="small" />
+                ) : (
+                  <FileType color={colors.text} size={18} />
+                )}
+                <Text style={s.secondaryActionLabel}>Esporta Word</Text>
+              </Pressable>
+            </View>
+
+            {isTableResult && (
+              <View style={s.chipRow}>
+                <Pressable
+                  style={({ pressed }) => [
+                    s.secondaryAction,
+                    (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
+                  ]}
+                  onPress={handleExportCsv}
+                  disabled={!outputText || Boolean(isExporting)}
+                >
+                  {isExporting === 'csv' ? (
+                    <ActivityIndicator color={colors.text} size="small" />
+                  ) : (
+                    <FileSpreadsheet color={colors.text} size={18} />
+                  )}
+                  <Text style={s.secondaryActionLabel}>Esporta CSV / Excel</Text>
+                </Pressable>
+              </View>
+            )}
 
             <Pressable
               style={({ pressed }) => [
@@ -453,6 +926,11 @@ export function DocumentsScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
       <Toast message={toastMessage} visible={Boolean(toastMessage)} />
+      <SignatureModal
+        visible={isSignatureModalVisible}
+        onClose={() => setIsSignatureModalVisible(false)}
+        onSaved={handleSignatureSaved}
+      />
     </LinearGradient>
   );
 }
@@ -470,6 +948,121 @@ const styles = StyleSheet.create({
   sourceHint: {
     color: colors.textMuted,
     fontSize: 12,
+  },
+  scanHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  scanHeaderTitle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  scanClearLabel: {
+    color: colors.danger,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  pageRow: {
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  pageThumbWrapper: {
+    width: 84,
+    gap: spacing.xs,
+  },
+  pageThumb: {
+    width: 84,
+    height: 112,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceAlt,
+    ...glassBorder,
+  },
+  pageBadge: {
+    position: 'absolute',
+    top: spacing.xs,
+    left: spacing.xs,
+    backgroundColor: colors.glow,
+    borderRadius: radius.pill,
+    minWidth: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 5,
+  },
+  pageBadgeLabel: {
+    color: colors.textOnPrimary,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  pageDeleteButton: {
+    position: 'absolute',
+    top: spacing.xs,
+    right: spacing.xs,
+    backgroundColor: colors.danger,
+    borderRadius: radius.pill,
+    width: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pageReorderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  pageReorderButton: {
+    width: 32,
+    height: 24,
+    borderRadius: radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceAlt,
+    ...glassBorder,
+  },
+  pageReorderButtonDisabled: {
+    opacity: 0.4,
+  },
+  addPageButton: {
+    width: 84,
+    height: 112,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceAlt,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: colors.border,
+  },
+  addPageButtonPressed: {
+    backgroundColor: colors.surfaceElevated,
+  },
+  signatureToggle: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md,
+    ...glassBorder,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+  },
+  signatureManageButton: {
+    width: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md,
+    ...glassBorder,
+  },
+  signatureTogglePressed: {
+    backgroundColor: colors.surfaceElevated,
+  },
+  signatureToggleLabel: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '600',
   },
   tabBarSpacer: {
     height: 96,

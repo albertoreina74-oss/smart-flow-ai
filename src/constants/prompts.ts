@@ -1,4 +1,4 @@
-export type ProcessMode = 'clean' | 'formal' | 'summary' | 'translate';
+export type ProcessMode = 'clean' | 'formal' | 'summary' | 'table' | 'translate';
 export type NonTranslateMode = Exclude<ProcessMode, 'translate'>;
 export type Density = 'essential' | 'detailed';
 export type Language = 'en' | 'es' | 'fr' | 'de' | 'it';
@@ -7,6 +7,7 @@ export const MODE_LABELS: Record<ProcessMode, string> = {
   clean: 'Pulisci',
   formal: 'Formale',
   summary: 'Sintesi',
+  table: 'Scontrini & Tabelle',
   translate: '🌐 Traduci',
 };
 
@@ -53,10 +54,13 @@ export const REGISTER_LABELS: Record<TranslationRegister, string> = {
   formal: 'Formale',
 };
 
+const SYSTEM_PROMPT_TABLE = `Analizza il testo fornito, proveniente dalla scansione di uno scontrino, una fattura o un documento con tabelle, ed estrailo in una tabella Markdown con separatori "|". Se si tratta di uno scontrino o una fattura, usa esattamente queste colonne, in questo ordine: Data | Nome Esercente | Voce/Descrizione | Importo | IVA — con una riga per ogni voce di spesa (ripeti Data, Nome Esercente e IVA su ogni riga se il documento li riporta una sola volta). Se invece il testo contiene una o più tabelle generiche, riproducile fedelmente mantenendo tutte le righe e le colonne originali, con le intestazioni di colonna corrette. Restituisci ESCLUSIVAMENTE la tabella in formato Markdown (riga di intestazione, riga di separatori con trattini, righe di dati), senza testo introduttivo, spiegazioni, commenti o blocchi di codice.`;
+
 export const SYSTEM_PROMPTS: Record<NonTranslateMode, string> = {
   clean: `Correggi solo i refusi di dettatura e la punteggiatura del testo fornito, senza alterarne lo stile, il tono o il significato originale. Restituisci esclusivamente il testo corretto, senza commenti o premesse aggiuntive.`,
   formal: `Rielabora il testo fornito in un italiano formale e professionale, adatto a comunicazioni di lavoro. Mantieni il significato originale. Restituisci esclusivamente il testo rielaborato, senza commenti o premesse aggiuntive.`,
   summary: `Estrai i punti chiave del testo fornito in un elenco puntato essenziale, in italiano. Restituisci esclusivamente l'elenco puntato, senza commenti o premesse aggiuntive.`,
+  table: SYSTEM_PROMPT_TABLE,
 };
 
 export const DENSITY_MODIFIERS: Record<Density, string> = {

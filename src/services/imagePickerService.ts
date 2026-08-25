@@ -1,26 +1,33 @@
 import * as ImagePicker from 'expo-image-picker';
 
 export type PickedImage = {
-  base64: string;
-  mimeType: string;
+  uri: string;
+  width: number;
+  height: number;
 };
 
-const PICKER_OPTIONS: ImagePicker.ImagePickerOptions = {
+const SINGLE_PICKER_OPTIONS: ImagePicker.ImagePickerOptions = {
   mediaTypes: ['images'],
-  base64: true,
-  quality: 0.6,
+  quality: 1,
   allowsEditing: false,
 };
 
-function toPickedImage(result: ImagePicker.ImagePickerResult): PickedImage | null {
+const MULTI_PICKER_OPTIONS: ImagePicker.ImagePickerOptions = {
+  mediaTypes: ['images'],
+  quality: 1,
+  allowsEditing: false,
+  allowsMultipleSelection: true,
+};
+
+function toPickedImages(result: ImagePicker.ImagePickerResult): PickedImage[] {
   if (result.canceled || !result.assets || result.assets.length === 0) {
-    return null;
+    return [];
   }
-  const asset = result.assets[0];
-  if (!asset.base64) {
-    throw new Error('Impossibile leggere i dati dell\'immagine selezionata.');
-  }
-  return { base64: asset.base64, mimeType: asset.mimeType ?? 'image/jpeg' };
+  return result.assets.map((asset) => ({
+    uri: asset.uri,
+    width: asset.width,
+    height: asset.height,
+  }));
 }
 
 export async function pickImageFromCamera(): Promise<PickedImage | null> {
@@ -28,15 +35,16 @@ export async function pickImageFromCamera(): Promise<PickedImage | null> {
   if (!permission.granted) {
     throw new Error('Permesso fotocamera negato. Abilitalo nelle impostazioni per scansionare documenti.');
   }
-  const result = await ImagePicker.launchCameraAsync(PICKER_OPTIONS);
-  return toPickedImage(result);
+  const result = await ImagePicker.launchCameraAsync(SINGLE_PICKER_OPTIONS);
+  const images = toPickedImages(result);
+  return images[0] ?? null;
 }
 
-export async function pickImageFromLibrary(): Promise<PickedImage | null> {
+export async function pickImagesFromLibrary(): Promise<PickedImage[]> {
   const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (!permission.granted) {
     throw new Error('Permesso libreria foto negato. Abilitalo nelle impostazioni per scansionare documenti.');
   }
-  const result = await ImagePicker.launchImageLibraryAsync(PICKER_OPTIONS);
-  return toPickedImage(result);
+  const result = await ImagePicker.launchImageLibraryAsync(MULTI_PICKER_OPTIONS);
+  return toPickedImages(result);
 }

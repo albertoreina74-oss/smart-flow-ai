@@ -18,10 +18,15 @@ import * as Haptics from 'expo-haptics';
 import * as Speech from 'expo-speech';
 import {
   ArrowRightLeft,
+  Camera,
   ClipboardPaste,
   Copy,
+  File as FileIcon,
   FileDown,
   FileText,
+  FileType,
+  Image as ImageIcon,
+  Printer,
   Share2,
   Sparkles,
   Star,
@@ -44,9 +49,22 @@ import {
   LANGUAGE_OPTIONS,
   TranslationRegister,
 } from '../constants/prompts';
-import { getFriendlyErrorMessage } from '../services/geminiService';
+import { extractTextFromImage, getFriendlyErrorMessage } from '../services/geminiService';
 import { readClipboard, writeClipboard } from '../services/clipboardService';
-import { exportResultAsMarkdown, exportResultAsPdf } from '../services/exportService';
+import {
+  exportResultAsDocx,
+  exportResultAsMarkdown,
+  exportResultAsPdf,
+  exportResultAsTxt,
+  PdfQuality,
+  printResult,
+} from '../services/exportService';
+import { pickImageFromCamera, pickImagesFromLibrary } from '../services/imagePickerService';
+import { enhanceScanImage, normalizeNativeScan } from '../services/scanEnhanceService';
+import {
+  isNativeDocumentScannerAvailable,
+  scanDocumentPagesNative,
+} from '../services/nativeDocumentScannerService';
 import { useGeminiProcessing } from '../hooks/useGeminiProcessing';
 import { computeMetrics, formatMetrics } from '../utils/textMetrics';
 
@@ -60,8 +78,10 @@ export function TranslateScreen() {
   const [targetLanguage, setTargetLanguage] = useState<Language>('en');
   const [register, setRegister] = useState<TranslationRegister>('natural');
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [isExporting, setIsExporting] = useState<'pdf' | 'markdown' | null>(null);
+  const [isExporting, setIsExporting] = useState<'pdf' | 'markdown' | 'txt' | 'docx' | 'print' | null>(null);
+  const [pdfQuality, setPdfQuality] = useState<PdfQuality>('high');
   const [toastMessage, setToastMessage] = useState('');
+  const [isCapturingImage, setIsCapturingImage] = useState<'camera' | 'gallery' | null>(null);
 
   const {
     outputText,
@@ -103,11 +123,67 @@ export function TranslateScreen() {
     setErrorMessage('');
   };
 
-  const handleProcess = () => {
+  const handleProcess = (textOverride?: string) => {
+    const sourceText = textOverride ?? inputText;
     Speech.stop();
     setIsSpeaking(false);
     const customPrompt = buildTranslatePrompt(targetLanguage, sourceLanguage, register);
-    runProcessing(inputText, 'clean', 'essential', targetLanguage, '🌐 Traduci', { customPrompt });
+    runProcessing(sourceText, 'clean', 'essential', targetLanguage, '🌐 Traduci', { customPrompt });
+  };
+
+  const runOcrAndTranslate = async (base64: string, mimeType: string) => {
+    const extracted = await extractTextFromImage(base64, mimeType);
+    setInputText(extracted);
+    if (extracted.trim()) {
+      handleProcess(extracted);
+    }
+  };
+
+  const handleCameraScan = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setIsCapturingImage('camera');
+    setErrorMessage('');
+    try {
+      if (isNativeDocumentScannerAvailable()) {
+        const outcome = await scanDocumentPagesNative();
+        if (!outcome || outcome.cancelled || outcome.imageUris.length === 0) {
+          return;
+        }
+        const enhanced = await normalizeNativeScan(outcome.imageUris[0]);
+        await runOcrAndTranslate(enhanced.base64, enhanced.mimeType);
+        return;
+      }
+      const image = await pickImageFromCamera();
+      if (!image) {
+        return;
+      }
+      const enhanced = await enhanceScanImage(image.uri, image.width, image.height);
+      await runOcrAndTranslate(enhanced.base64, enhanced.mimeType);
+    } catch (error) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setErrorMessage(getFriendlyErrorMessage(error));
+    } finally {
+      setIsCapturingImage(null);
+    }
+  };
+
+  const handleGalleryPick = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setIsCapturingImage('gallery');
+    setErrorMessage('');
+    try {
+      const images = await pickImagesFromLibrary();
+      if (images.length === 0) {
+        return;
+      }
+      const enhanced = await enhanceScanImage(images[0].uri, images[0].width, images[0].height);
+      await runOcrAndTranslate(enhanced.base64, enhanced.mimeType);
+    } catch (error) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setErrorMessage(getFriendlyErrorMessage(error));
+    } finally {
+      setIsCapturingImage(null);
+    }
   };
 
   const handleCopyResult = async () => {
@@ -160,7 +236,22 @@ export function TranslateScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsExporting('pdf');
     try {
-      await exportResultAsPdf(outputText);
+      await exportResultAsPdf(outputText, undefined, pdfQuality);
+    } catch (error) {
+      setErrorMessage(getFriendlyErrorMessage(error));
+    } finally {
+      setIsExporting(null);
+    }
+  };
+
+  const handlePrint = async () => {
+    if (!outputText || isExporting) {
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setIsExporting('print');
+    try {
+      await printResult(outputText, undefined, pdfQuality);
     } catch (error) {
       setErrorMessage(getFriendlyErrorMessage(error));
     } finally {
@@ -176,6 +267,36 @@ export function TranslateScreen() {
     setIsExporting('markdown');
     try {
       await exportResultAsMarkdown(outputText);
+    } catch (error) {
+      setErrorMessage(getFriendlyErrorMessage(error));
+    } finally {
+      setIsExporting(null);
+    }
+  };
+
+  const handleExportTxt = async () => {
+    if (!outputText || isExporting) {
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setIsExporting('txt');
+    try {
+      await exportResultAsTxt(outputText);
+    } catch (error) {
+      setErrorMessage(getFriendlyErrorMessage(error));
+    } finally {
+      setIsExporting(null);
+    }
+  };
+
+  const handleExportDocx = async () => {
+    if (!outputText || isExporting) {
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setIsExporting('docx');
+    try {
+      await exportResultAsDocx(outputText);
     } catch (error) {
       setErrorMessage(getFriendlyErrorMessage(error));
     } finally {
@@ -278,6 +399,45 @@ export function TranslateScreen() {
             </View>
           </View>
 
+          <View style={s.optionGrid}>
+            <Pressable
+              style={({ pressed }) => [
+                s.optionCard,
+                styles.sourceCard,
+                pressed && s.actionChipPressed,
+                isCapturingImage === 'camera' && s.optionSelected,
+              ]}
+              onPress={handleCameraScan}
+              disabled={Boolean(isCapturingImage)}
+            >
+              {isCapturingImage === 'camera' ? (
+                <ActivityIndicator color={colors.text} />
+              ) : (
+                <Camera color={colors.glow} size={26} />
+              )}
+              <Text style={styles.sourceLabel}>📷 Fotocamera</Text>
+              <Text style={styles.sourceHint}>Scansiona</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [
+                s.optionCard,
+                styles.sourceCard,
+                pressed && s.actionChipPressed,
+                isCapturingImage === 'gallery' && s.optionSelected,
+              ]}
+              onPress={handleGalleryPick}
+              disabled={Boolean(isCapturingImage)}
+            >
+              {isCapturingImage === 'gallery' ? (
+                <ActivityIndicator color={colors.text} />
+              ) : (
+                <ImageIcon color={colors.glow} size={26} />
+              )}
+              <Text style={styles.sourceLabel}>🖼️ Galleria</Text>
+              <Text style={styles.sourceHint}>Estrai e traduci</Text>
+            </Pressable>
+          </View>
+
           <Card style={s.section}>
             <Text style={s.sectionLabel}>Testo di partenza</Text>
             <TextInput
@@ -309,7 +469,7 @@ export function TranslateScreen() {
 
           <Pressable
             style={({ pressed }) => [s.primaryButtonWrapper, (!canProcess || pressed) && s.primaryButtonDisabled]}
-            onPress={handleProcess}
+            onPress={() => handleProcess()}
             disabled={!canProcess}
           >
             <LinearGradient colors={gradient.action} style={s.primaryButton}>
@@ -374,6 +534,31 @@ export function TranslateScreen() {
               </Pressable>
             </View>
 
+            <View style={s.optionGrid}>
+              <Pressable
+                style={[s.optionCard, pdfQuality === 'high' && s.optionSelected]}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  setPdfQuality('high');
+                }}
+              >
+                <Text style={[s.optionLabel, pdfQuality === 'high' && s.optionLabelSelected]}>
+                  Qualità Alta
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[s.optionCard, pdfQuality === 'compact' && s.optionSelected]}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  setPdfQuality('compact');
+                }}
+              >
+                <Text style={[s.optionLabel, pdfQuality === 'compact' && s.optionLabelSelected]}>
+                  Compatto per Email
+                </Text>
+              </Pressable>
+            </View>
+
             <View style={s.chipRow}>
               <Pressable
                 style={({ pressed }) => [
@@ -395,6 +580,24 @@ export function TranslateScreen() {
                   s.secondaryAction,
                   (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
                 ]}
+                onPress={handlePrint}
+                disabled={!outputText || Boolean(isExporting)}
+              >
+                {isExporting === 'print' ? (
+                  <ActivityIndicator color={colors.text} size="small" />
+                ) : (
+                  <Printer color={colors.text} size={18} />
+                )}
+                <Text style={s.secondaryActionLabel}>Stampa</Text>
+              </Pressable>
+            </View>
+
+            <View style={s.chipRow}>
+              <Pressable
+                style={({ pressed }) => [
+                  s.secondaryAction,
+                  (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
+                ]}
                 onPress={handleExportMarkdown}
                 disabled={!outputText || Boolean(isExporting)}
               >
@@ -404,6 +607,39 @@ export function TranslateScreen() {
                   <FileText color={colors.text} size={18} />
                 )}
                 <Text style={s.secondaryActionLabel}>Esporta MD</Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [
+                  s.secondaryAction,
+                  (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
+                ]}
+                onPress={handleExportTxt}
+                disabled={!outputText || Boolean(isExporting)}
+              >
+                {isExporting === 'txt' ? (
+                  <ActivityIndicator color={colors.text} size="small" />
+                ) : (
+                  <FileIcon color={colors.text} size={18} />
+                )}
+                <Text style={s.secondaryActionLabel}>Esporta TXT</Text>
+              </Pressable>
+            </View>
+
+            <View style={s.chipRow}>
+              <Pressable
+                style={({ pressed }) => [
+                  s.secondaryAction,
+                  (!outputText || isExporting || pressed) && s.secondaryActionDisabled,
+                ]}
+                onPress={handleExportDocx}
+                disabled={!outputText || Boolean(isExporting)}
+              >
+                {isExporting === 'docx' ? (
+                  <ActivityIndicator color={colors.text} size="small" />
+                ) : (
+                  <FileType color={colors.text} size={18} />
+                )}
+                <Text style={s.secondaryActionLabel}>Esporta Word</Text>
               </Pressable>
             </View>
 
@@ -428,6 +664,19 @@ export function TranslateScreen() {
 }
 
 const styles = StyleSheet.create({
+  sourceCard: {
+    gap: spacing.xs,
+  },
+  sourceLabel: {
+    color: colors.text,
+    fontWeight: '700',
+    fontSize: 15,
+    marginTop: spacing.xs,
+  },
+  sourceHint: {
+    color: colors.textMuted,
+    fontSize: 12,
+  },
   swapButton: {
     alignSelf: 'center',
     width: 40,
