@@ -505,12 +505,20 @@ export function HomeScreen() {
           <Card style={s.section}>
             <View style={s.header}>
               <Text style={s.sectionLabel}>Testo di partenza</Text>
-              <Pressable
-                style={({ pressed }) => [s.iconButton, pressed && s.iconButtonPressed]}
-                onPress={() => setIsWebLinkModalVisible(true)}
-              >
-                <Link2 color={colors.glow} size={18} />
-              </Pressable>
+              <View style={s.headerActions}>
+                <Pressable
+                  style={({ pressed }) => [s.iconButton, pressed && s.iconButtonPressed]}
+                  onPress={() => setIsWebLinkModalVisible(true)}
+                >
+                  <Link2 color={colors.glow} size={18} />
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [s.iconButton, pressed && s.iconButtonPressed]}
+                  onPress={() => handleQuickAction('clear')}
+                >
+                  <Trash2 color={colors.textMuted} size={18} />
+                </Pressable>
+              </View>
             </View>
             <TextInput
               value={inputText}

@@ -66,11 +66,7 @@ import {
   printResult,
 } from '../services/exportService';
 import { pickImageFromCamera, pickImagesFromLibrary } from '../services/imagePickerService';
-import { enhanceScanImage, normalizeNativeScan } from '../services/scanEnhanceService';
-import {
-  isNativeDocumentScannerAvailable,
-  scanDocumentPagesNative,
-} from '../services/nativeDocumentScannerService';
+import { enhanceScanImage } from '../services/scanEnhanceService';
 import { useGeminiProcessing } from '../hooks/useGeminiProcessing';
 import { computeMetrics, formatMetrics } from '../utils/textMetrics';
 
@@ -147,20 +143,15 @@ export function TranslateScreen() {
     }
   };
 
+  // Bypasses the native VisionKit scanner on purpose — see the matching
+  // comment in DocumentsScreen.tsx's handleCameraPress for why. The plain
+  // camera capture below only fires on an explicit user tap and has no
+  // extra crop-review screen.
   const handleCameraScan = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsCapturingImage('camera');
     setErrorMessage('');
     try {
-      if (isNativeDocumentScannerAvailable()) {
-        const outcome = await scanDocumentPagesNative();
-        if (!outcome || outcome.cancelled || outcome.imageUris.length === 0) {
-          return;
-        }
-        const enhanced = await normalizeNativeScan(outcome.imageUris[0]);
-        await runOcrAndTranslate(enhanced.base64, enhanced.mimeType);
-        return;
-      }
       const image = await pickImageFromCamera();
       if (!image) {
         return;

@@ -68,11 +68,7 @@ import {
 import { getSavedSignature } from '../services/storageService';
 import { writeClipboard } from '../services/clipboardService';
 import { pickImageFromCamera, pickImagesFromLibrary } from '../services/imagePickerService';
-import { enhanceScanImage, normalizeNativeScan } from '../services/scanEnhanceService';
-import {
-  isNativeDocumentScannerAvailable,
-  scanDocumentPagesNative,
-} from '../services/nativeDocumentScannerService';
+import { enhanceScanImage } from '../services/scanEnhanceService';
 import { pickDocument } from '../services/documentService';
 import {
   exportResultAsCsv,
@@ -176,33 +172,6 @@ export function DocumentsScreen() {
     }
   };
 
-  const addScanPagesFromNativeScanner = async () => {
-    setIsScanning(true);
-    setErrorMessage('');
-    try {
-      const outcome = await scanDocumentPagesNative();
-      if (!outcome || outcome.cancelled || outcome.imageUris.length === 0) {
-        return;
-      }
-      const enhanced = await Promise.all(outcome.imageUris.map((uri) => normalizeNativeScan(uri)));
-      setScanPages((pages) => [
-        ...pages,
-        ...enhanced.map((image) => ({
-          id: nextScanPageId(),
-          uri: image.uri,
-          base64: image.base64,
-          mimeType: image.mimeType,
-        })),
-      ]);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch (error) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setErrorMessage(getFriendlyErrorMessage(error));
-    } finally {
-      setIsScanning(false);
-    }
-  };
-
   const addScanPagesFromLibrary = async () => {
     setIsScanning(true);
     setErrorMessage('');
@@ -232,16 +201,15 @@ export function DocumentsScreen() {
     }
   };
 
+  // Deliberately bypasses the native VisionKit document scanner
+  // (`react-native-document-scanner-plugin`): VNDocumentCameraViewController
+  // doesn't expose any public API to disable its auto-capture or its
+  // post-shot perspective-crop review screen, and on-device that review
+  // screen was positioning its crop handles incorrectly and losing edits.
+  // The plain camera capture (allowsEditing: false) is fully manual — the
+  // shutter only fires on an explicit tap, with no extra review screen.
   const handleCameraPress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (isNativeDocumentScannerAvailable()) {
-      Alert.alert('Scansiona documento', 'Rilevamento automatico dei contorni con correzione prospettica.', [
-        { text: 'Scansione fotocamera', onPress: addScanPagesFromNativeScanner },
-        { text: 'Scegli dalla libreria', onPress: addScanPagesFromLibrary },
-        { text: 'Annulla', style: 'cancel' },
-      ]);
-      return;
-    }
     Alert.alert('Scansiona documento', 'Scegli la sorgente. Puoi aggiungere più pagine di seguito.', [
       { text: 'Scatta foto', onPress: addScanPageFromCamera },
       { text: 'Scegli dalla libreria', onPress: addScanPagesFromLibrary },
@@ -522,7 +490,6 @@ export function DocumentsScreen() {
     }
   };
 
-  const nativeScannerAvailable = isNativeDocumentScannerAvailable();
   const canProcess = extractedText.trim().length > 0 && !isProcessing;
   const isTableResult = lastProcessedMode === 'table';
   const metrics = computeMetrics(extractedText);
@@ -578,9 +545,7 @@ export function DocumentsScreen() {
                 <Camera color={colors.glow} size={26} />
               )}
               <Text style={styles.sourceLabel}>Fotocamera</Text>
-              <Text style={styles.sourceHint}>
-                {nativeScannerAvailable ? 'Rilevamento automatico' : 'Scansione OCR'}
-              </Text>
+              <Text style={styles.sourceHint}>Scansione OCR</Text>
             </Pressable>
           </View>
 
@@ -680,12 +645,24 @@ export function DocumentsScreen() {
           <Card style={s.section}>
             <View style={s.header}>
               <Text style={s.sectionLabel}>Testo estratto</Text>
-              <Pressable
-                style={({ pressed }) => [s.iconButton, pressed && s.iconButtonPressed]}
-                onPress={() => setIsWebLinkModalVisible(true)}
-              >
-                <Link2 color={colors.glow} size={18} />
-              </Pressable>
+              <View style={s.headerActions}>
+                <Pressable
+                  style={({ pressed }) => [s.iconButton, pressed && s.iconButtonPressed]}
+                  onPress={() => setIsWebLinkModalVisible(true)}
+                >
+                  <Link2 color={colors.glow} size={18} />
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [s.iconButton, pressed && s.iconButtonPressed]}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    setExtractedText('');
+                    setErrorMessage('');
+                  }}
+                >
+                  <Trash2 color={colors.textMuted} size={18} />
+                </Pressable>
+              </View>
             </View>
             <TextInput
               value={extractedText}
