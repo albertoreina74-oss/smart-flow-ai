@@ -6,6 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "scheme": "smartflow",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.smartflow.ai",
@@ -62,6 +63,17 @@
         "react-native-document-scanner-plugin",
         {
           "cameraPermission": "Consenti a Smart Flow AI di accedere alla fotocamera per la scansione nativa dei documenti."
+        }
+      ],
+      [
+        "expo-share-intent",
+        {
+          "iosActivationRules": {
+            "NSExtensionActivationSupportsText": true,
+            "NSExtensionActivationSupportsWebURLWithMaxCount": 1,
+            "NSExtensionActivationSupportsWebPageWithMaxCount": 1
+          },
+          "iosAppGroupIdentifier": "group.com.smartflow.ai"
         }
       ]
     ],

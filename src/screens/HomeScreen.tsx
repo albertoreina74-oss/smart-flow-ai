@@ -82,7 +82,8 @@ import {
   getSavedSignature,
   setBiometricLockEnabled,
 } from '../services/storageService';
-import { ExtractedArticle } from '../services/webExtractorService';
+import { ExtractedArticle, extractArticleFromUrl } from '../services/webExtractorService';
+import { IncomingImport } from '../hooks/useIncomingShareIntent';
 import { pickBestVoiceForLocale } from '../services/speechVoiceService';
 import { useGeminiProcessing } from '../hooks/useGeminiProcessing';
 import { computeMetrics, formatMetrics } from '../utils/textMetrics';
@@ -110,7 +111,13 @@ const QUICK_ACTIONS: { id: string; label: string; icon: typeof ClipboardPaste }[
 
 const TOAST_DURATION_MS = 1800;
 
-export function HomeScreen() {
+type HomeScreenProps = {
+  /** A share-sheet or `smartflow://` deep-link payload waiting to be imported. */
+  pendingImport?: IncomingImport | null;
+  onPendingImportHandled?: () => void;
+};
+
+export function HomeScreen({ pendingImport, onPendingImportHandled }: HomeScreenProps = {}) {
   const insets = useSafeAreaInsets();
   const [inputText, setInputText] = useState('');
   const [selectedTone, setSelectedTone] = useState<string>('clean');
@@ -263,6 +270,49 @@ export function HomeScreen() {
     showToast('Articolo estratto, sintesi in corso...');
     runProcessing(combinedText, 'summary', selectedDensity, 'it', MODE_LABELS.summary, { temperature });
   };
+
+  // Text shared from another app (share sheet) or from a
+  // `smartflow://process?text=...` deep link — cleaned up directly.
+  const handleImportedText = (text: string) => {
+    Speech.stop();
+    setIsSpeaking(false);
+    setInputText(text);
+    setSelectedTone('clean');
+    setLastProcessedMode('clean');
+    showToast('Testo importato, elaborazione in corso...');
+    runProcessing(text, 'clean', selectedDensity, 'it', MODE_LABELS.clean, { temperature });
+  };
+
+  // A web link shared from another app or received via
+  // `smartflow://extract-url?url=...` — extracted with the same Jina
+  // Reader pipeline as the "Link Web" button, then summarized.
+  const handleImportedUrl = async (url: string) => {
+    showToast('Link importato, estrazione in corso...');
+    try {
+      const article = await extractArticleFromUrl(url);
+      handleWebExtracted(article);
+    } catch (error) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setErrorMessage(getFriendlyErrorMessage(error));
+    }
+  };
+
+  // Consumes a share-sheet/deep-link payload the moment it arrives — App.tsx
+  // only mounts this screen with a `pendingImport` set (switching tabs to
+  // Home first), so this fires once per import regardless of whether the
+  // app was cold-started or already running.
+  useEffect(() => {
+    if (!pendingImport) {
+      return;
+    }
+    if (pendingImport.kind === 'text') {
+      handleImportedText(pendingImport.value);
+    } else {
+      handleImportedUrl(pendingImport.value);
+    }
+    onPendingImportHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingImport]);
 
   const handleCopyResult = async () => {
     if (!outputText) {

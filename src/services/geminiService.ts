@@ -99,6 +99,13 @@ export function getFriendlyErrorMessage(error: unknown): string {
   if (/network|failed to fetch/i.test(raw)) {
     return 'Connessione assente o instabile. Controlla la rete e riprova.';
   }
+  // Every other error thrown across this app (permessi negati, file non
+  // valido, URL malformato, ecc.) already carries a clear, translated
+  // message meant to be shown as-is — only fall back to a generic message
+  // when there's truly nothing usable to show.
+  if (error instanceof Error && raw.trim()) {
+    return raw;
+  }
   return 'Si è verificato un errore imprevisto durante l\'elaborazione. Riprova.';
 }
 
