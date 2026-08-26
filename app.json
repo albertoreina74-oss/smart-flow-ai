@@ -11,7 +11,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.smartflow.ai",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "CFBundleDisplayName": "Chiaro"
       }
     },
     "android": {
