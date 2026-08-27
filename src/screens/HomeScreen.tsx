@@ -80,6 +80,7 @@ import {
   getBiometricLockEnabled,
   getCustomPrompts,
   getSavedSignature,
+  HistoryEntry,
   setBiometricLockEnabled,
 } from '../services/storageService';
 import { ExtractedArticle, extractArticleFromUrl } from '../services/webExtractorService';
@@ -116,9 +117,17 @@ type HomeScreenProps = {
   /** A share-sheet or `smartflow://` deep-link payload waiting to be imported. */
   pendingImport?: IncomingImport | null;
   onPendingImportHandled?: () => void;
+  /** An archived result the user asked to reopen. */
+  pendingEntry?: HistoryEntry | null;
+  onPendingEntryHandled?: () => void;
 };
 
-export function HomeScreen({ pendingImport, onPendingImportHandled }: HomeScreenProps = {}) {
+export function HomeScreen({
+  pendingImport,
+  onPendingImportHandled,
+  pendingEntry,
+  onPendingEntryHandled,
+}: HomeScreenProps = {}) {
   const insets = useSafeAreaInsets();
   const [inputText, setInputText] = useState('');
   const [selectedTone, setSelectedTone] = useState<string>('clean');
@@ -156,6 +165,7 @@ export function HomeScreen({ pendingImport, onPendingImportHandled }: HomeScreen
     canUndoRefine,
     refineResult,
     undoRefine,
+    restoreResult,
   } = useGeminiProcessing();
 
   useEffect(() => {
@@ -324,6 +334,19 @@ export function HomeScreen({ pendingImport, onPendingImportHandled }: HomeScreen
     onPendingImportHandled?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingImport]);
+
+  // Same one-shot pattern for an archived result being reopened: put its
+  // source back in the input box and its text back in the result card, live
+  // enough to be refined, exported or favorited from here.
+  useEffect(() => {
+    if (!pendingEntry) {
+      return;
+    }
+    setInputText(pendingEntry.originalText);
+    restoreResult(pendingEntry);
+    onPendingEntryHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingEntry]);
 
   const handleCopyResult = async () => {
     if (!outputText) {

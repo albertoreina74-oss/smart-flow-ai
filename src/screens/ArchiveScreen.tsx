@@ -4,7 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as Haptics from 'expo-haptics';
-import { ScanFace, Search, Star, Trash2 } from 'lucide-react-native';
+import { Copy, ScanFace, Search, Star, Trash2 } from 'lucide-react-native';
 import { Toast } from '../components/Toast';
 import { colors, glassBorder, gradient, radius, spacing, typography } from '../constants/theme';
 import { screenStyles as s } from '../constants/sharedStyles';
@@ -30,7 +30,12 @@ function formatTimestamp(timestamp: number): string {
   });
 }
 
-export function ArchiveScreen() {
+type ArchiveScreenProps = {
+  /** Reopens a saved result in Flow, where it can be refined or exported again. */
+  onOpenEntry: (entry: HistoryEntry) => void;
+};
+
+export function ArchiveScreen({ onOpenEntry }: ArchiveScreenProps) {
   const insets = useSafeAreaInsets();
   const [isLocked, setIsLocked] = useState(false);
   const [isCheckingLock, setIsCheckingLock] = useState(true);
@@ -80,10 +85,15 @@ export function ArchiveScreen() {
     }
   };
 
-  const handleSelectEntry = async (entry: HistoryEntry) => {
+  const handleCopyEntry = async (entry: HistoryEntry) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     await writeClipboard(entry.generatedText);
     showToast('Copiato negli appunti');
+  };
+
+  const handleSelectEntry = (entry: HistoryEntry) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    onOpenEntry(entry);
   };
 
   const handleToggleFavorite = async (id: string) => {
@@ -209,6 +219,9 @@ export function ArchiveScreen() {
                   <Text style={styles.itemMode}>{item.modeLabel}</Text>
                   <View style={styles.itemHeaderActions}>
                     <Text style={styles.itemDate}>{formatTimestamp(item.createdAt)}</Text>
+                    <Pressable hitSlop={8} onPress={() => handleCopyEntry(item)}>
+                      <Copy color={colors.textMuted} size={16} />
+                    </Pressable>
                     <Pressable hitSlop={8} onPress={() => handleToggleFavorite(item.id)}>
                       <Star
                         color={item.isFavorite ? colors.glow : colors.textMuted}

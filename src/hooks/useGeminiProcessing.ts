@@ -102,6 +102,29 @@ export function useGeminiProcessing() {
   };
 
   /**
+   * Loads a result saved earlier back into the live editing state, so an
+   * archived entry becomes a starting point again: it can be listened to,
+   * exported, refined further, or favorited, and any refinement updates that
+   * same entry rather than creating a duplicate.
+   */
+  const restoreResult = (entry: {
+    id: string;
+    generatedText: string;
+    modeLabel: string;
+    isFavorite: boolean;
+  }) => {
+    streamHandleRef.current?.cancel();
+    setIsProcessing(false);
+    setIsRefining(false);
+    setErrorMessage('');
+    setOutputText(entry.generatedText);
+    setCurrentEntryId(entry.id);
+    setIsCurrentFavorite(entry.isFavorite);
+    setRefineUndoStack([]);
+    modeLabelRef.current = entry.modeLabel;
+  };
+
+  /**
    * Runs a follow-up pass over the *current result* rather than the original
    * source, so the user can converge on what they wanted in a couple of taps
    * instead of re-running the same generation and hoping for a better roll.
@@ -208,5 +231,6 @@ export function useGeminiProcessing() {
     canUndoRefine: refineUndoStack.length > 0,
     refineResult,
     undoRefine,
+    restoreResult,
   };
 }
