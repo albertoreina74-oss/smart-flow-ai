@@ -17,8 +17,14 @@ type ExportSheetProps = {
   onClose: () => void;
   title?: string;
   options: ExportSheetOption[];
-  /** Optional controls (e.g. a quality toggle) rendered above the option list. */
-  header?: React.ReactNode;
+  /**
+   * Optional controls (e.g. a quality toggle) rendered above the option list.
+   *
+   * Receives `runAfterDismiss`, which must be used for anything that opens
+   * another modal or a native sheet: those cannot be presented while this one
+   * is still on screen, and attempting it leaves the app unresponsive.
+   */
+  header?: (helpers: { runAfterDismiss: (action: () => void) => void }) => React.ReactNode;
 };
 
 export function ExportSheet({ visible, onClose, title = 'Esporta / Condividi', options, header }: ExportSheetProps) {
@@ -49,11 +55,8 @@ export function ExportSheet({ visible, onClose, title = 'Esporta / Condividi', o
     }
   }, []);
 
-  const handleSelect = (option: ExportSheetOption) => {
-    if (option.loading) {
-      return;
-    }
-    pendingActionRef.current = option.onPress;
+  const runAfterDismiss = (action: () => void) => {
+    pendingActionRef.current = action;
     onClose();
 
     if (Platform.OS !== 'ios') {
@@ -63,8 +66,15 @@ export function ExportSheet({ visible, onClose, title = 'Esporta / Condividi', o
       return;
     }
     // Safety net: should `onDismiss` not arrive for any reason, still run the
-    // action rather than leaving the user with a button that does nothing.
+    // action rather than leaving the user with a control that does nothing.
     fallbackTimerRef.current = setTimeout(runPendingAction, 700);
+  };
+
+  const handleSelect = (option: ExportSheetOption) => {
+    if (option.loading) {
+      return;
+    }
+    runAfterDismiss(option.onPress);
   };
 
   return (
@@ -80,7 +90,7 @@ export function ExportSheet({ visible, onClose, title = 'Esporta / Condividi', o
         <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
           <View style={styles.grabber} />
           <Text style={styles.title}>{title}</Text>
-          {header}
+          {header?.({ runAfterDismiss })}
           <View style={styles.optionsCard}>
             {options.map((option, index) => (
               <Pressable

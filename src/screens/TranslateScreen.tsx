@@ -524,7 +524,7 @@ export function TranslateScreen() {
       <ExportSheet
         visible={isExportSheetVisible}
         onClose={() => setIsExportSheetVisible(false)}
-        header={
+        header={() => (
           <View style={s.segmentedControl}>
             <Pressable
               style={[s.segmentedOption, pdfQuality === 'high' && s.segmentedOptionActive]}
@@ -549,7 +549,7 @@ export function TranslateScreen() {
               </Text>
             </Pressable>
           </View>
-        }
+        )}
         options={[
           { key: 'share', label: 'Condividi testo', icon: Share2, onPress: handleShare },
           { key: 'pdf', label: 'Esporta PDF', icon: FileDown, onPress: handleExportPdf, loading: isExporting === 'pdf' },

@@ -399,9 +399,12 @@ export function HomeScreen({ pendingImport, onPendingImportHandled }: HomeScreen
     showToast(enabled ? 'Blocco biometrico attivato' : 'Blocco biometrico disattivato');
   };
 
-  const handleToggleIncludeSignature = () => {
+  // `runAfterDismiss` comes from the export sheet: with no signature saved yet
+  // this opens the signature modal, and a second modal cannot be presented
+  // while the sheet is still up — iOS refuses, and the app stops responding.
+  const handleToggleIncludeSignature = (runAfterDismiss: (action: () => void) => void) => {
     if (!savedSignature) {
-      setIsSignatureModalVisible(true);
+      runAfterDismiss(() => setIsSignatureModalVisible(true));
       return;
     }
     Haptics.selectionAsync();
@@ -722,12 +725,12 @@ export function HomeScreen({ pendingImport, onPendingImportHandled }: HomeScreen
       <ExportSheet
         visible={isExportSheetVisible}
         onClose={() => setIsExportSheetVisible(false)}
-        header={
+        header={({ runAfterDismiss }) => (
           <View style={styles.sheetHeader}>
             <View style={s.chipRow}>
               <Pressable
                 style={({ pressed }) => [styles.signatureToggle, pressed && styles.signatureTogglePressed]}
-                onPress={handleToggleIncludeSignature}
+                onPress={() => handleToggleIncludeSignature(runAfterDismiss)}
               >
                 {includeSignature && savedSignature ? (
                   <SquareCheck color={colors.glow} size={18} />
@@ -738,7 +741,7 @@ export function HomeScreen({ pendingImport, onPendingImportHandled }: HomeScreen
               </Pressable>
               <Pressable
                 style={({ pressed }) => [styles.signatureManageButton, pressed && styles.signatureTogglePressed]}
-                onPress={() => setIsSignatureModalVisible(true)}
+                onPress={() => runAfterDismiss(() => setIsSignatureModalVisible(true))}
               >
                 <PenLine color={colors.text} size={18} />
               </Pressable>
@@ -768,7 +771,7 @@ export function HomeScreen({ pendingImport, onPendingImportHandled }: HomeScreen
               </Pressable>
             </View>
           </View>
-        }
+        )}
         options={[
           { key: 'share', label: 'Condividi testo', icon: Share2, onPress: handleShare },
           { key: 'pdf', label: 'Esporta PDF', icon: FileDown, onPress: handleExportPdf, loading: isExporting === 'pdf' },
